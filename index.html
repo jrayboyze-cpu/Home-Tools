@@ -73,30 +73,29 @@
         <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
         Demo Mode (Offline)
       </span>
-      <button id="toggle-config-btn" class="p-2 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 rounded-lg transition-colors border border-zinc-200 bg-white" title="Google Drive Settings">
+      <button id="toggle-config-btn" class="p-2 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 rounded-lg transition-colors border border-zinc-200 bg-white" title="Advanced Google Drive Settings">
         <i data-lucide="settings" class="w-4 h-4"></i>
       </button>
     </div>
   </header>
 
-  <!-- Google Drive Configuration Drawer / Settings Bar (Collapsible) -->
+  <!-- Google Drive Configuration Drawer / Settings Bar (Collapsible Advanced Settings) -->
   <section id="config-drawer" class="hidden border-b border-zinc-200 bg-zinc-50 p-6 transition-all duration-300">
     <div class="max-w-5xl mx-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-sm font-semibold uppercase tracking-wider text-zinc-500 flex items-center gap-2">
-          <i data-lucide="google" class="w-4 h-4"></i> Google Drive Authorization Settings
+          <i data-lucide="cog" class="w-4 h-4"></i> Advanced Developer Credentials
         </h2>
         <button id="close-config-btn" class="text-zinc-400 hover:text-zinc-600">
           <i data-lucide="x" class="w-4 h-4"></i>
         </button>
       </div>
       <p class="text-xs text-zinc-600 mb-4 max-w-3xl leading-relaxed">
-        Connect to your personal Google Drive to pull files automatically from folders named 
-        <strong class="text-zinc-800">"Plant Based Recipes"</strong> and <strong class="text-zinc-800">"Recipes"</strong>. 
-        Setting this up requires only a Client ID. Your keys are saved directly in your browser.
+        This panel is for primary developer setup. Once saved, you can use the 
+        <strong class="text-zinc-800">"Copy Share Link"</strong> button in the main widget to share access with family members without them ever needing to see these configurations.
       </p>
       
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="md:col-span-2">
           <label class="block text-xs font-medium text-zinc-600 mb-1">OAuth Client ID</label>
           <input type="text" id="input-client-id" placeholder="123456-abcdef.apps.googleusercontent.com" class="w-full px-3 py-2 text-sm border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 bg-white">
@@ -110,33 +109,39 @@
           </button>
         </div>
       </div>
-
-      <!-- Live Sync Controls (Only active when Client ID exists) -->
-      <div id="sync-actions-panel" class="hidden border-t border-zinc-200 pt-4 mt-4 flex flex-wrap items-center justify-between gap-4">
-        <div class="flex items-center gap-3">
-          <button id="btn-connect-google" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2 px-4 rounded-lg transition-colors flex items-center gap-2 shadow-sm shadow-emerald-700/10">
-            <i data-lucide="log-in" class="w-3.5 h-3.5"></i> Sign In & Sync Drive
-          </button>
-          <button id="btn-disconnect-google" class="hidden text-rose-600 hover:text-rose-700 text-xs font-semibold py-2 px-3 border border-rose-200 rounded-lg hover:bg-rose-50 transition-colors">
-            Sign Out
-          </button>
-          <button id="btn-share-link" class="bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-xs font-semibold py-2 px-3 rounded-lg border border-zinc-300 transition-colors flex items-center gap-1.5" title="Get a custom link to share with family">
-            <i data-lucide="share-2" class="w-3.5 h-3.5"></i> Copy Share Link for Wife
-          </button>
-        </div>
-        <div id="drive-stats-text" class="text-xs text-zinc-500 italic">
-          Not signed in. Using demonstration recipe library.
-        </div>
-      </div>
     </div>
   </section>
 
   <!-- Application Body -->
   <main class="flex-1 flex flex-col lg:flex-row max-w-[1700px] w-full mx-auto p-4 lg:p-6 gap-6 overflow-hidden">
     
-    <!-- Sidebar Controls (Using order-2 on mobile, returning to default order-1 on desktop) -->
+    <!-- Sidebar Controls -->
     <aside class="order-2 lg:order-1 w-full lg:w-80 flex flex-col gap-6 flex-shrink-0">
       
+      <!-- Simplified Google Drive Connection Card (Always visible once Client ID is saved) -->
+      <div id="sidebar-sync-card" class="hidden bg-emerald-50/55 border border-emerald-100 rounded-xl p-5 shadow-sm">
+        <h2 class="text-sm font-bold text-emerald-900 mb-3 flex items-center gap-1.5">
+          <i data-lucide="cloud" class="w-4 h-4 text-emerald-600"></i> Cloud Recipe Connection
+        </h2>
+        <p class="text-[11px] text-emerald-800/80 mb-4 leading-relaxed">
+          Google Drive synchronization is configured and ready. Select your option below:
+        </p>
+        <div class="flex flex-col gap-2">
+          <button id="btn-sidebar-connect" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-sm shadow-emerald-750/10">
+            <i data-lucide="log-in" class="w-3.5 h-3.5"></i> Sign In & Sync Drive
+          </button>
+          <button id="btn-sidebar-disconnect" class="hidden w-full bg-white hover:bg-rose-50 text-rose-600 border border-rose-250 text-xs font-semibold py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2">
+            <i data-lucide="log-out" class="w-3.5 h-3.5"></i> Disconnect Drive
+          </button>
+          <button id="btn-sidebar-share" class="w-full bg-white hover:bg-zinc-50 text-zinc-700 border border-zinc-200 text-xs font-semibold py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2" title="Copy custom access link for other devices">
+            <i data-lucide="share-2" class="w-3.5 h-3.5"></i> Copy Share Link
+          </button>
+        </div>
+        <div id="sidebar-sync-stats" class="text-[10px] text-emerald-800/80 mt-3 text-center italic">
+          Not signed in. Running demo recipe library.
+        </div>
+      </div>
+
       <!-- Calendar Picker & Configuration Card -->
       <div class="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
         <h2 class="text-base font-bold text-zinc-800 mb-4 flex items-center gap-2">
@@ -215,7 +220,7 @@
           <button id="tab-standard-recipes" class="flex-1 pb-2 border-b-2 border-transparent text-zinc-400 hover:text-zinc-600 text-center">Standard</button>
         </div>
 
-        <!-- Scrollable List of Drag elements (Tucked on mobile: h-48 is exactly ~4-5 items tall) -->
+        <!-- Scrollable List of Drag elements (Tucked on mobile) -->
         <div id="recipe-pool-list" class="h-48 lg:h-auto lg:flex-1 overflow-y-auto custom-scrollbar space-y-1.5 text-xs pr-1">
           <!-- Populated by Javascript -->
         </div>
@@ -226,7 +231,7 @@
       </div>
     </aside>
 
-    <!-- Main Calendar Area (Using order-1 on mobile, returning to order-2 on desktop) -->
+    <!-- Main Calendar Area -->
     <section class="order-1 lg:order-2 flex-1 flex flex-col bg-white border border-zinc-200 rounded-2xl shadow-sm overflow-hidden">
       
       <!-- Calendar Interface Header Controls -->
@@ -394,11 +399,13 @@
     const inputClientId = document.getElementById('input-client-id');
     const btnSaveCredentials = document.getElementById('btn-save-credentials');
     const btnClearCredentials = document.getElementById('btn-clear-credentials');
-    const btnConnectGoogle = document.getElementById('btn-connect-google');
-    const btnDisconnectGoogle = document.getElementById('btn-disconnect-google');
-    const btnShareLink = document.getElementById('btn-share-link');
-    const driveStatsText = document.getElementById('drive-stats-text');
-    const syncActionsPanel = document.getElementById('sync-actions-panel');
+    
+    // Core Shared Widgets
+    const sidebarSyncCard = document.getElementById('sidebar-sync-card');
+    const btnSidebarConnect = document.getElementById('btn-sidebar-connect');
+    const btnSidebarDisconnect = document.getElementById('btn-sidebar-disconnect');
+    const btnSidebarShare = document.getElementById('btn-sidebar-share');
+    const sidebarSyncStats = document.getElementById('sidebar-sync-stats');
 
     // Calendar Navigation Elements
     const btnPrevMonth = document.getElementById('btn-prev-month');
@@ -452,9 +459,10 @@
         const sharedClientId = hashParams.get('client_id');
         if (sharedClientId) {
           localStorage.setItem('google_recipe_client_id', decodeURIComponent(sharedClientId));
-          // Clear hash to clean up the browser URL bar
-          history.replaceState(null, null, ' ');
-          showNotification("Settings imported from share link! Ready to sign in.", "success");
+          
+          // Clear hash to hide the raw client ID in browser URL bar
+          history.replaceState(null, null, window.location.pathname);
+          showNotification("Settings imported seamlessly! Ready to connect.", "success");
         }
       }
     }
@@ -464,7 +472,9 @@
       const savedClient = localStorage.getItem('google_recipe_client_id');
       if (savedClient) {
         inputClientId.value = savedClient;
-        syncActionsPanel.classList.remove('hidden');
+        sidebarSyncCard.classList.remove('hidden');
+      } else {
+        sidebarSyncCard.classList.add('hidden');
       }
 
       // Load Saved Schedules
@@ -496,25 +506,28 @@
           return;
         }
         localStorage.setItem('google_recipe_client_id', client);
-        syncActionsPanel.classList.remove('hidden');
-        showNotification("Client ID saved. You can now login.", "success");
+        sidebarSyncCard.classList.remove('hidden');
+        configDrawer.classList.add('hidden');
+        showNotification("Client ID saved. Cloud Connection card is active.", "success");
       });
 
       btnClearCredentials.addEventListener('click', () => {
         inputClientId.value = '';
         localStorage.removeItem('google_recipe_client_id');
-        syncActionsPanel.classList.add('hidden');
-        btnDisconnectGoogle.click();
+        sidebarSyncCard.classList.add('hidden');
+        handleSignoutClick();
         showNotification("Cleared saved Google API configurations.", "success");
       });
 
-      // Copy custom share link for wife
-      btnShareLink.addEventListener('click', () => {
-        const client = inputClientId.value.trim();
+      // Copy custom share link for family
+      btnSidebarShare.addEventListener('click', () => {
+        const client = localStorage.getItem('google_recipe_client_id') || inputClientId.value.trim();
         if (!client) {
           showNotification("Save your Client ID before sharing.", "error");
           return;
         }
+        
+        // Build the share link
         const shareUrl = `${window.location.origin}${window.location.pathname}#client_id=${encodeURIComponent(client)}`;
         
         // Use document.execCommand copy fallback for iframe compatibility
@@ -525,12 +538,12 @@
         document.execCommand('copy');
         document.body.removeChild(tempInput);
 
-        showNotification("Family configuration link copied! Send this to your wife.", "success");
+        showNotification("Share Link copied to clipboard! Share it with your family.", "success");
       });
 
-      // Auth Action Buttons
-      btnConnectGoogle.addEventListener('click', handleAuthClick);
-      btnDisconnectGoogle.addEventListener('click', handleSignoutClick);
+      // Auth Action Buttons (Connected from Sidebar widget)
+      btnSidebarConnect.addEventListener('click', handleAuthClick);
+      btnSidebarDisconnect.addEventListener('click', handleSignoutClick);
 
       // Month Picker Controls
       monthPicker.addEventListener('change', (e) => {
@@ -628,7 +641,7 @@
       renderRecipePool();
     }
 
-    // --- Google OAuth Implicit Flow Setup (No GAPI SDK initialization needed) ---
+    // --- Google OAuth Implicit Flow Setup ---
     async function handleAuthClick() {
       const savedClient = localStorage.getItem('google_recipe_client_id');
       
@@ -639,7 +652,7 @@
       }
 
       if (typeof google === 'undefined' || !google.accounts) {
-        showNotification("Google accounts service script is still loading. Try again in a moment.", "error");
+        showNotification("Google Identity SDK loading. Try again in a moment.", "error");
         return;
       }
 
@@ -656,8 +669,8 @@
             
             state.accessToken = tokenResponse.access_token;
             
-            btnConnectGoogle.classList.add('hidden');
-            btnDisconnectGoogle.classList.remove('hidden');
+            btnSidebarConnect.classList.add('hidden');
+            btnSidebarDisconnect.classList.remove('hidden');
             
             await loadGoogleDriveRecipes();
           },
@@ -666,7 +679,7 @@
         tokenClient.requestAccessToken({ prompt: 'consent' });
       } catch (err) {
         console.error("Failed to build token client", err);
-        showNotification("OAuth client creation failed. Check console error logs.", "error");
+        showNotification("OAuth client creation failed.", "error");
       }
     }
 
@@ -677,12 +690,12 @@
         state.recipes = [...MOCK_RECIPES];
         state.isConnectedToDrive = false;
         
-        btnConnectGoogle.classList.remove('hidden');
-        btnDisconnectGoogle.classList.add('hidden');
+        btnSidebarConnect.classList.remove('hidden');
+        btnSidebarDisconnect.classList.add('hidden');
         
         connectionBadge.className = "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200";
         connectionBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>Demo Mode (Offline)`;
-        driveStatsText.innerHTML = "Signed out. Displaying standard demonstrations.";
+        sidebarSyncStats.innerHTML = "Signed out. Displaying standard demonstrations.";
         
         renderRecipePool();
         renderCalendar();
@@ -694,7 +707,7 @@
     async function loadGoogleDriveRecipes() {
       if (!state.accessToken) return;
       
-      driveStatsText.innerHTML = `<span class="flex items-center gap-1"><i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i> Reading Drive folders...</span>`;
+      sidebarSyncStats.innerHTML = `<span class="flex items-center justify-center gap-1"><i data-lucide="loader" class="w-3.5 h-3.5 animate-spin text-emerald-600"></i> Syncing recipes...</span>`;
       lucide.createIcons();
 
       try {
@@ -709,7 +722,7 @@
         if (!folderResponse.ok) {
           if (folderResponse.status === 401) {
             handleSignoutClick();
-            showNotification("Your Google login session expired. Please sign in again.", "error");
+            showNotification("Your Google session expired. Please sign in again.", "error");
             return;
           }
           throw new Error(`Folder list API error: ${folderResponse.statusText}`);
@@ -720,7 +733,7 @@
 
         if (!folders || folders.length === 0) {
           showNotification("Could not find folders named 'Plant Based Recipes' or 'Recipes' in your Drive.", "error");
-          driveStatsText.textContent = "Folders not found. Please verify folder names in your Google Drive.";
+          sidebarSyncStats.textContent = "Folders not found. Please verify your folder names in Google Drive.";
           return;
         }
 
@@ -761,7 +774,7 @@
 
         if (fetchedRecipes.length === 0) {
           showNotification("Recipe folders found, but they are currently empty.", "error");
-          driveStatsText.textContent = "Google Drive connected. Target folders contain 0 recipe files.";
+          sidebarSyncStats.textContent = "Folders connected, but they contain 0 recipes.";
           return;
         }
 
@@ -773,7 +786,7 @@
         connectionBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span>Connected to Drive`;
         
         let statString = Object.entries(statsInfo).map(([name, count]) => `${name}: ${count}`).join(' | ');
-        driveStatsText.textContent = `Connected! Syncing: ${statString}`;
+        sidebarSyncStats.textContent = `Connected! ${statString}`;
         
         renderRecipePool();
         renderCalendar();
@@ -781,8 +794,8 @@
 
       } catch (err) {
         console.error("Drive folder synchronization failed", err);
-        showNotification("Failed to fetch documents. Check your Client ID configuration.", "error");
-        driveStatsText.textContent = "Sync connection failed.";
+        showNotification("Failed to fetch documents.", "error");
+        sidebarSyncStats.textContent = "Sync connection failed.";
       }
     }
 
@@ -806,7 +819,7 @@
         recipePoolList.innerHTML = `
           <div class="text-center py-8 text-zinc-400">
             <i data-lucide="package-open" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
-            <p>No recipes match search criteria.</p>
+            <p>No recipes match search.</p>
           </div>
         `;
         lucide.createIcons();
@@ -873,7 +886,6 @@
       });
     }
 
-    // --- STREAMING_CHUNK: Setting up calendar grid render engine... ---
     // --- Calendar Layout Generator & Renderer ---
     function renderCalendar() {
       calendarHeaderTitle.textContent = `${MONTHS[state.currentMonth]} ${state.currentYear}`;
@@ -1325,3 +1337,4 @@
   </script>
 </body>
 </html>
+```eof
