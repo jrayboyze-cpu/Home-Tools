@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meal & Recipe Calendar Planner</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Identity Services (GIS) for easy client-side login -->
+  <script src="https://accounts.google.com/gsi/client" defer></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Google Font (Inter & DM Sans) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    h1, h2, h3, .font-display {
+      font-family: 'DM Sans', sans-serif;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #e4e4e7;
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #d4d4d8;
+    }
+    /* Calendar transition animation */
+    .calendar-fade {
+      animation: fadeIn 0.25s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-[#fafafa] text-zinc-900 min-h-screen flex flex-col antialiased">
+
+  <!-- Main Notification Container -->
+  <div id="notification-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full"></div>
+
+  <!-- Header -->
+  <header class="border-b border-zinc-200 bg-white sticky top-0 z-40 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <div class="bg-emerald-50 text-emerald-700 p-2.5 rounded-xl border border-emerald-100">
+        <i data-lucide="calendar-heart" class="w-6 h-6"></i>
+      </div>
+      <div>
+        <h1 class="text-xl font-bold tracking-tight text-zinc-900">Weekly & Monthly Meal Planner</h1>
+        <p class="text-xs text-zinc-500">Organize your kitchen schedules, plant-based and standard recipes</p>
+      </div>
+    </div>
+
+    <!-- Mode Badge -->
+    <div class="flex items-center gap-2">
+      <span id="connection-badge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+        <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+        Demo Mode (Offline)
+      </span>
+      <button id="toggle-config-btn" class="p-2 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 rounded-lg transition-colors border border-zinc-200 bg-white" title="Google Drive Settings">
+        <i data-lucide="settings" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Google Drive Configuration Drawer / Settings Bar (Collapsible) -->
+  <section id="config-drawer" class="hidden border-b border-zinc-200 bg-zinc-50 p-6 transition-all duration-300">
+    <div class="max-w-5xl mx-auto">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-zinc-500 flex items-center gap-2">
+          <i data-lucide="google" class="w-4 h-4"></i> Google Drive Authorization Settings
+        </h2>
+        <button id="close-config-btn" class="text-zinc-400 hover:text-zinc-600">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <p class="text-xs text-zinc-600 mb-4 max-w-3xl leading-relaxed">
+        Connect to your personal Google Drive to pull files automatically from folders named 
+        <strong class="text-zinc-800">"Plant Based Recipes"</strong> and <strong class="text-zinc-800">"Recipes"</strong>. 
+        Setting this up requires only a Client ID. Your keys are saved directly in your browser.
+      </p>
+      
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div class="md:col-span-2">
+          <label class="block text-xs font-medium text-zinc-600 mb-1">OAuth Client ID</label>
+          <input type="text" id="input-client-id" placeholder="123456-abcdef.apps.googleusercontent.com" class="w-full px-3 py-2 text-sm border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 bg-white">
+        </div>
+        <div class="flex items-end gap-2">
+          <button id="btn-save-credentials" class="flex-1 bg-zinc-800 text-white hover:bg-zinc-900 text-sm font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2">
+            <i data-lucide="save" class="w-4 h-4"></i> Save ID
+          </button>
+          <button id="btn-clear-credentials" class="bg-zinc-200 text-zinc-700 hover:bg-zinc-300 text-sm font-medium py-2 px-3 rounded-lg transition-colors" title="Clear saved credentials">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Sync Controls (Only active when Client ID exists) -->
+      <div id="sync-actions-panel" class="hidden border-t border-zinc-200 pt-4 mt-4 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <button id="btn-connect-google" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2 px-4 rounded-lg transition-colors flex items-center gap-2 shadow-sm shadow-emerald-700/10">
+            <i data-lucide="log-in" class="w-3.5 h-3.5"></i> Sign In & Sync Drive
+          </button>
+          <button id="btn-disconnect-google" class="hidden text-rose-600 hover:text-rose-700 text-xs font-semibold py-2 px-3 border border-rose-200 rounded-lg hover:bg-rose-50 transition-colors">
+            Sign Out
+          </button>
+          <button id="btn-share-link" class="bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-xs font-semibold py-2 px-3 rounded-lg border border-zinc-300 transition-colors flex items-center gap-1.5" title="Get a custom link to share with family">
+            <i data-lucide="share-2" class="w-3.5 h-3.5"></i> Copy Share Link for Wife
+          </button>
+        </div>
+        <div id="drive-stats-text" class="text-xs text-zinc-500 italic">
+          Not signed in. Using demonstration recipe library.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Application Body -->
+  <main class="flex-1 flex flex-col lg:flex-row max-w-[1700px] w-full mx-auto p-4 lg:p-6 gap-6 overflow-hidden">
+    
+    <!-- Sidebar Controls -->
+    <aside class="w-full lg:w-80 flex flex-col gap-6 flex-shrink-0">
+      
+      <!-- Calendar Picker & Configuration Card -->
+      <div class="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm">
+        <h2 class="text-base font-bold text-zinc-800 mb-4 flex items-center gap-2">
+          <i data-lucide="sliders" class="w-4 h-4 text-emerald-600"></i> Date & Generation Controls
+        </h2>
+        
+        <!-- Month and Year Selector -->
+        <div class="space-y-3 mb-5">
+          <label class="block text-xs font-medium text-zinc-500">Target Month & Year</label>
+          <div class="relative flex items-center">
+            <input type="month" id="calendar-month-picker" class="w-full pl-3 pr-10 py-2.5 text-sm font-medium border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 cursor-pointer text-zinc-700 bg-zinc-50 hover:bg-zinc-100 transition-colors">
+            <div class="absolute right-3 pointer-events-none text-zinc-400">
+              <i data-lucide="calendar" class="w-4 h-4"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recipe Distribution Strategy -->
+        <div class="space-y-3 mb-6">
+          <label class="block text-xs font-medium text-zinc-500">Recipe Selection Mode</label>
+          <div class="grid grid-cols-1 gap-2">
+            <label class="flex items-center gap-2.5 p-2.5 border border-zinc-200 rounded-lg hover:bg-zinc-50 cursor-pointer text-sm">
+              <input type="radio" name="generation-mode" value="all" checked class="text-emerald-600 focus:ring-emerald-500">
+              <div>
+                <span class="block font-medium text-zinc-800">Mix All Recipes</span>
+                <span class="block text-[10px] text-zinc-400">Random combination of everything</span>
+              </div>
+            </label>
+            <label class="flex items-center gap-2.5 p-2.5 border border-zinc-200 rounded-lg hover:bg-zinc-50 cursor-pointer text-sm">
+              <input type="radio" name="generation-mode" value="plant-based" class="text-emerald-600 focus:ring-emerald-500">
+              <div>
+                <span class="block font-medium text-zinc-800">Plant-Based Only</span>
+                <span class="block text-[10px] text-zinc-400">Strictly pull from green list</span>
+              </div>
+            </label>
+            <label class="flex items-center gap-2.5 p-2.5 border border-zinc-200 rounded-lg hover:bg-zinc-50 cursor-pointer text-sm">
+              <input type="radio" name="generation-mode" value="alternating" class="text-emerald-600 focus:ring-emerald-500">
+              <div>
+                <span class="block font-medium text-zinc-800">Alternating Schedule</span>
+                <span class="block text-[10px] text-zinc-400">Alternate plant-based & standard</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Action Trigger -->
+        <button id="btn-generate-plan" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-3 px-4 rounded-xl shadow-sm shadow-emerald-800/10 transition-colors flex items-center justify-center gap-2 text-sm">
+          <i data-lucide="sparkles" class="w-4 h-4"></i> Generate New Month Plan
+        </button>
+        <p class="text-[10px] text-zinc-400 text-center mt-2.5 leading-relaxed">
+          Generating replaces currently unsaved days. Existing days with locked choices or custom notes can be preserved.
+        </p>
+      </div>
+
+      <!-- Filterable Recipe Pool (Allows Drag and Drop) -->
+      <div class="bg-white border border-zinc-200 rounded-xl p-5 shadow-sm flex-1 flex flex-col min-h-[300px] lg:max-h-[500px]">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-bold text-zinc-800 flex items-center gap-1.5">
+            <i data-lucide="bookmark-check" class="w-4 h-4 text-emerald-600"></i> Recipe Bank
+          </h2>
+          <span id="recipe-count-badge" class="text-[11px] bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full font-medium">0 items</span>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="relative flex items-center mb-4">
+          <input type="text" id="recipe-search" placeholder="Search recipe database..." class="w-full pl-8 pr-3 py-1.5 text-xs border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500">
+          <div class="absolute left-2.5 text-zinc-400 pointer-events-none">
+            <i data-lucide="search" class="w-3.5 h-3.5"></i>
+          </div>
+        </div>
+
+        <!-- Category Tabs -->
+        <div class="flex border-b border-zinc-100 mb-3 text-xs">
+          <button id="tab-all-recipes" class="flex-1 pb-2 border-b-2 border-emerald-600 text-emerald-700 font-semibold text-center">All</button>
+          <button id="tab-pb-recipes" class="flex-1 pb-2 border-b-2 border-transparent text-zinc-400 hover:text-zinc-600 text-center">Plant-Based</button>
+          <button id="tab-standard-recipes" class="flex-1 pb-2 border-b-2 border-transparent text-zinc-400 hover:text-zinc-600 text-center">Standard</button>
+        </div>
+
+        <!-- Scrollable List of Drag elements -->
+        <div id="recipe-pool-list" class="flex-1 overflow-y-auto custom-scrollbar space-y-1.5 text-xs pr-1">
+          <!-- Populated by Javascript -->
+        </div>
+        <div class="mt-3 pt-2.5 border-t border-zinc-100 text-[10px] text-zinc-400 flex items-center gap-1 justify-center">
+          <i data-lucide="info" class="w-3.5 h-3.5"></i>
+          <span>Drag list items straight onto any calendar day!</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Calendar Area -->
+    <section class="flex-1 flex flex-col bg-white border border-zinc-200 rounded-2xl shadow-sm overflow-hidden">
+      
+      <!-- Calendar Interface Header Controls -->
+      <div class="flex flex-wrap items-center justify-between gap-4 p-5 border-b border-zinc-200 bg-zinc-50">
+        
+        <!-- Navigation Panel (Arrows + Date Title) -->
+        <div class="flex items-center gap-3">
+          <div class="inline-flex rounded-lg border border-zinc-200 bg-white shadow-xs p-0.5">
+            <button id="btn-prev-month" class="p-1.5 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50 rounded-md transition-colors" title="Previous Month">
+              <i data-lucide="chevron-left" class="w-4 h-4"></i>
+            </button>
+            <button id="btn-current-month" class="px-3 py-1 text-xs font-semibold text-zinc-600 hover:text-zinc-800 hover:bg-zinc-50 rounded-md transition-colors border-x border-zinc-100" title="Go to today's month">
+              Today
+            </button>
+            <button id="btn-next-month" class="p-1.5 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50 rounded-md transition-colors" title="Next Month">
+              <i data-lucide="chevron-right" class="w-4 h-4"></i>
+            </button>
+          </div>
+          
+          <!-- Month/Year Display Title with Interactive Month Select Trigger -->
+          <div class="relative">
+            <button id="btn-select-month-picker" class="text-lg font-bold text-zinc-800 flex items-center gap-1.5 hover:bg-zinc-100 px-3 py-1 rounded-lg transition-colors">
+              <span id="calendar-header-title">June 2026</span>
+              <i data-lucide="chevron-down" class="w-4 h-4 text-zinc-500"></i>
+            </button>
+            
+            <!-- Google-styled Month Select Popover -->
+            <div id="popover-month-selector" class="hidden absolute top-full left-0 mt-1.5 w-64 bg-white border border-zinc-200 rounded-xl shadow-xl z-50 p-4 calendar-fade">
+              <div class="flex items-center justify-between mb-3 pb-2 border-b border-zinc-100">
+                <button id="popover-prev-year" class="p-1 hover:bg-zinc-100 rounded text-zinc-500 hover:text-zinc-800">
+                  <i data-lucide="chevrons-left" class="w-4 h-4"></i>
+                </button>
+                <span id="popover-year-display" class="font-bold text-zinc-700">2026</span>
+                <button id="popover-next-year" class="p-1 hover:bg-zinc-100 rounded text-zinc-500 hover:text-zinc-800">
+                  <i data-lucide="chevrons-right" class="w-4 h-4"></i>
+                </button>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <!-- Build Month Selector Grid programmatically -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Custom Quick-filter Tools -->
+        <div class="flex items-center gap-2">
+          <button id="btn-clear-calendar" class="text-zinc-500 hover:text-rose-600 hover:bg-rose-50 border border-zinc-200 hover:border-rose-100 font-semibold px-3 py-1.5 rounded-lg text-xs transition-all flex items-center gap-1.5 bg-white">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Clear Plan
+          </button>
+          <button id="btn-export-calendar" class="text-zinc-700 hover:text-zinc-900 border border-zinc-200 font-semibold px-3 py-1.5 rounded-lg text-xs transition-all flex items-center gap-1.5 bg-white shadow-xs">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i> Export Text
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Responsive Grid -->
+      <div class="flex-1 grid grid-rows-[auto_1fr] overflow-hidden min-h-[500px]">
+        <!-- Days of Week Headers -->
+        <div class="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50/50 text-center text-xs font-semibold text-zinc-500 py-2.5">
+          <div>Sun</div>
+          <div>Mon</div>
+          <div>Tue</div>
+          <div>Wed</div>
+          <div>Thu</div>
+          <div>Fri</div>
+          <div>Sat</div>
+        </div>
+
+        <!-- Days Grid -->
+        <div id="calendar-days-container" class="grid grid-cols-7 bg-zinc-200 gap-[1px] h-full overflow-y-auto custom-scrollbar">
+          <!-- Dynamically populated by JS -->
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Note Dialog Modal -->
+  <dialog id="modal-notes" class="rounded-xl border border-zinc-200 shadow-2xl p-6 w-full max-w-sm backdrop:bg-zinc-900/40">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-sm font-bold text-zinc-800 flex items-center gap-2">
+        <i data-lucide="notepad-text" class="w-4 h-4 text-emerald-600"></i> Day Customization Note
+      </h3>
+      <button onclick="document.getElementById('modal-notes').close()" class="text-zinc-400 hover:text-zinc-600">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+    
+    <div class="space-y-4">
+      <div id="modal-day-badge" class="text-xs bg-zinc-100 px-2.5 py-1 rounded text-zinc-600 inline-block font-medium"></div>
+      <input type="hidden" id="modal-target-date">
+      <div>
+        <label class="block text-xs font-medium text-zinc-500 mb-1">Kitchen Prep Notes / Substitutions</label>
+        <textarea id="modal-note-text" rows="3" placeholder="e.g. Prep quinoa Sunday night, double sauce..." class="w-full text-sm px-3 py-2 border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 bg-white"></textarea>
+      </div>
+      
+      <div class="flex justify-end gap-2 pt-2 border-t border-zinc-100">
+        <button onclick="document.getElementById('modal-notes').close()" class="px-3 py-1.5 border border-zinc-200 text-zinc-600 text-xs font-medium rounded-lg hover:bg-zinc-50">Cancel</button>
+        <button id="btn-save-note" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg shadow-xs">Save Details</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- JavaScript Application Script -->
+  <script>
+    // App Constants & Default Library Data
+    const MOCK_RECIPES = [
+      { id: 'pb1', name: 'Zesty Lemon Herb Quinoa Bowl', url: 'https://docs.google.com', type: 'plant-based' },
+      { id: 'pb2', name: 'Creamy Coconut Chickpea Curry', url: 'https://docs.google.com', type: 'plant-based' },
+      { id: 'pb3', name: 'Smoky Maple Tempeh Bacon BLT', url: 'https://docs.google.com', type: 'plant-based' },
+      { id: 'pb4', name: 'Spiced Lentil Shepherd\'s Pie', url: 'https://docs.google.com', type: 'plant-based' },
+      { id: 'pb5', name: 'Roasted Sweet Potato & Black Bean Tacos', url: 'https://docs.google.com', type: 'plant-based' },
+      { id: 'pb6', name: 'Spaghetti Squash with Sunflower Seed Pesto', url: 'https://docs.google.com', type: 'plant-based' },
+      { id: 'pb7', name: 'Crispy Sesame Ginger Tofu Noodles', url: 'https://docs.google.com', type: 'plant-based' },
+      { id: 'pb8', name: 'Mediterranean Hummus & Falafel Wrap', url: 'https://docs.google.com', type: 'plant-based' },
+      { id: 'pb9', name: 'Creamy Cashew Alfredo with Broccoli', url: 'https://docs.google.com', type: 'plant-based' },
+      { id: 'pb10', name: 'Butternut Squash & Sage Risotto', url: 'https://docs.google.com', type: 'plant-based' },
+      
+      { id: 'r1', name: 'Garlic Butter Herb Roast Chicken', url: 'https://docs.google.com', type: 'standard' },
+      { id: 'r2', name: 'Pan-Seared Salmon with Dill Butter', url: 'https://docs.google.com', type: 'standard' },
+      { id: 'r3', name: 'Classic Beef Bourguignon', url: 'https://docs.google.com', type: 'standard' },
+      { id: 'r4', name: 'Lemon Parmesan Shrimp Scampi Pasta', url: 'https://docs.google.com', type: 'standard' },
+      { id: 'r5', name: 'Slow-Cooker Pulled Pork Sandwiches', url: 'https://docs.google.com', type: 'standard' },
+      { id: 'r6', name: 'Crispy Skin Duck Breast with Blackberry Sauce', url: 'https://docs.google.com', type: 'standard' },
+      { id: 'r7', name: 'Thyme & Rosemary Lamb Chops', url: 'https://docs.google.com', type: 'standard' },
+      { id: 'r8', name: 'Classic Homemade Beef Lasagna', url: 'https://docs.google.com', type: 'standard' },
+      { id: 'r9', name: 'White Wine Butter Steamed Clams', url: 'https://docs.google.com', type: 'standard' },
+      { id: 'r10', name: 'Honey Mustard Glazed Pork Tenderloin', url: 'https://docs.google.com', type: 'standard' }
+    ];
+
+    const MONTHS = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+
+    // State Management
+    let state = {
+      recipes: [...MOCK_RECIPES],
+      calendarPlans: {}, // Maps 'YYYY-MM' -> { 'YYYY-MM-DD': { recipe, note, locked } }
+      currentYear: 2026,
+      currentMonth: 5, // June (0-indexed)
+      isConnectedToDrive: false,
+      accessToken: null,
+      activeRecipeTab: 'all',
+      recipeSearchQuery: '',
+      draggingRecipe: null,
+      draggingFromDay: null
+    };
+
+    // Google Services State
+    let tokenClient = null;
+
+    // DOM Elements
+    const monthPicker = document.getElementById('calendar-month-picker');
+    const calendarHeaderTitle = document.getElementById('calendar-header-title');
+    const calendarDaysContainer = document.getElementById('calendar-days-container');
+    const recipePoolList = document.getElementById('recipe-pool-list');
+    const recipeCountBadge = document.getElementById('recipe-count-badge');
+    const recipeSearchInput = document.getElementById('recipe-search');
+    const connectionBadge = document.getElementById('connection-badge');
+    
+    // UI Panels / Config Drawers
+    const configDrawer = document.getElementById('config-drawer');
+    const toggleConfigBtn = document.getElementById('toggle-config-btn');
+    const closeConfigBtn = document.getElementById('close-config-btn');
+    const inputClientId = document.getElementById('input-client-id');
+    const btnSaveCredentials = document.getElementById('btn-save-credentials');
+    const btnClearCredentials = document.getElementById('btn-clear-credentials');
+    const btnConnectGoogle = document.getElementById('btn-connect-google');
+    const btnDisconnectGoogle = document.getElementById('btn-disconnect-google');
+    const btnShareLink = document.getElementById('btn-share-link');
+    const driveStatsText = document.getElementById('drive-stats-text');
+    const syncActionsPanel = document.getElementById('sync-actions-panel');
+
+    // Calendar Navigation Elements
+    const btnPrevMonth = document.getElementById('btn-prev-month');
+    const btnNextMonth = document.getElementById('btn-next-month');
+    const btnCurrentMonth = document.getElementById('btn-current-month');
+    const btnSelectMonthPicker = document.getElementById('btn-select-month-picker');
+    const popoverMonthSelector = document.getElementById('popover-month-selector');
+    const popoverYearDisplay = document.getElementById('popover-year-display');
+    const popoverPrevYear = document.getElementById('popover-prev-year');
+    const popoverNextYear = document.getElementById('popover-next-year');
+
+    // General Control Actions
+    const btnGeneratePlan = document.getElementById('btn-generate-plan');
+    const btnClearCalendar = document.getElementById('btn-clear-calendar');
+    const btnExportCalendar = document.getElementById('btn-export-calendar');
+
+    // Notes Modal Elements
+    const modalNotes = document.getElementById('modal-notes');
+    const modalDayBadge = document.getElementById('modal-day-badge');
+    const modalTargetDate = document.getElementById('modal-target-date');
+    const modalNoteText = document.getElementById('modal-note-text');
+    const btnSaveNote = document.getElementById('btn-save-note');
+
+    // --- Core Application Initialization ---
+    window.addEventListener('DOMContentLoaded', () => {
+      // Check if URL has a shared configuration hash first
+      checkSharedConfigurationLink();
+
+      // Setup current system date
+      const today = new Date();
+      state.currentYear = today.getFullYear();
+      state.currentMonth = today.getMonth();
+      
+      // Load saved configurations and schedules from localStorage
+      loadSavedData();
+      
+      // Initialize layout view pickers
+      updatePickerInputs();
+      renderRecipePool();
+      renderCalendar();
+      setupEventListeners();
+      
+      // Initialize Lucide icon tags
+      lucide.createIcons();
+    });
+
+    // Check if the page was opened via a configuration share link
+    function checkSharedConfigurationLink() {
+      if (window.location.hash) {
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const sharedClientId = hashParams.get('client_id');
+        if (sharedClientId) {
+          localStorage.setItem('google_recipe_client_id', decodeURIComponent(sharedClientId));
+          // Clear hash to clean up the browser URL bar
+          history.replaceState(null, null, ' ');
+          showNotification("Settings imported from share link! Ready to sign in.", "success");
+        }
+      }
+    }
+
+    // Handle LocalStorage loading
+    function loadSavedData() {
+      const savedClient = localStorage.getItem('google_recipe_client_id');
+      if (savedClient) {
+        inputClientId.value = savedClient;
+        syncActionsPanel.classList.remove('hidden');
+      }
+
+      // Load Saved Schedules
+      const savedPlans = localStorage.getItem('recipe_calendar_plans');
+      if (savedPlans) {
+        try {
+          state.calendarPlans = JSON.parse(savedPlans);
+        } catch (e) {
+          console.error("Failed to parse calendar plans", e);
+        }
+      }
+    }
+
+    // Standard Setup Listeners
+    function setupEventListeners() {
+      // Drawer layout triggers
+      toggleConfigBtn.addEventListener('click', () => {
+        configDrawer.classList.toggle('hidden');
+      });
+      closeConfigBtn.addEventListener('click', () => {
+        configDrawer.classList.add('hidden');
+      });
+
+      // Saving Credentials
+      btnSaveCredentials.addEventListener('click', () => {
+        const client = inputClientId.value.trim();
+        if (!client) {
+          showNotification("Please provide a Client ID to configure.", "error");
+          return;
+        }
+        localStorage.setItem('google_recipe_client_id', client);
+        syncActionsPanel.classList.remove('hidden');
+        showNotification("Client ID saved. You can now login.", "success");
+      });
+
+      btnClearCredentials.addEventListener('click', () => {
+        inputClientId.value = '';
+        localStorage.removeItem('google_recipe_client_id');
+        syncActionsPanel.classList.add('hidden');
+        btnDisconnectGoogle.click();
+        showNotification("Cleared saved Google API configurations.", "success");
+      });
+
+      // Copy custom share link for wife
+      btnShareLink.addEventListener('click', () => {
+        const client = inputClientId.value.trim();
+        if (!client) {
+          showNotification("Save your Client ID before sharing.", "error");
+          return;
+        }
+        const shareUrl = `${window.location.origin}${window.location.pathname}#client_id=${encodeURIComponent(client)}`;
+        
+        // Use document.execCommand copy fallback for iframe compatibility
+        const tempInput = document.createElement('input');
+        tempInput.value = shareUrl;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+
+        showNotification("Family configuration link copied! Send this to your wife.", "success");
+      });
+
+      // Auth Action Buttons
+      btnConnectGoogle.addEventListener('click', handleAuthClick);
+      btnDisconnectGoogle.addEventListener('click', handleSignoutClick);
+
+      // Month Picker Controls
+      monthPicker.addEventListener('change', (e) => {
+        if (!e.target.value) return;
+        const [year, month] = e.target.value.split('-');
+        state.currentYear = parseInt(year);
+        state.currentMonth = parseInt(month) - 1; // months are 0-indexed in JS
+        renderCalendar();
+      });
+
+      // Calendar Navigation Buttons
+      btnPrevMonth.addEventListener('click', () => changeMonth(-1));
+      btnNextMonth.addEventListener('click', () => changeMonth(1));
+      btnCurrentMonth.addEventListener('click', () => {
+        const d = new Date();
+        state.currentYear = d.getFullYear();
+        state.currentMonth = d.getMonth();
+        updatePickerInputs();
+        renderCalendar();
+      });
+
+      // Custom Google-style dropdown select
+      btnSelectMonthPicker.addEventListener('click', (e) => {
+        e.stopPropagation();
+        popoverMonthSelector.classList.toggle('hidden');
+        popoverYearDisplay.textContent = state.currentYear;
+        renderPopoverMonths();
+      });
+
+      document.addEventListener('click', () => {
+        popoverMonthSelector.classList.add('hidden');
+      });
+
+      popoverMonthSelector.addEventListener('click', (e) => e.stopPropagation());
+
+      popoverPrevYear.addEventListener('click', () => {
+        const year = parseInt(popoverYearDisplay.textContent) - 1;
+        popoverYearDisplay.textContent = year;
+        renderPopoverMonths();
+      });
+
+      popoverNextYear.addEventListener('click', () => {
+        const year = parseInt(popoverYearDisplay.textContent) + 1;
+        popoverYearDisplay.textContent = year;
+        renderPopoverMonths();
+      });
+
+      // Recipe Pool filter actions
+      document.getElementById('tab-all-recipes').addEventListener('click', (e) => selectCategoryTab(e, 'all'));
+      document.getElementById('tab-pb-recipes').addEventListener('click', (e) => selectCategoryTab(e, 'plant-based'));
+      document.getElementById('tab-standard-recipes').addEventListener('click', (e) => selectCategoryTab(e, 'standard'));
+
+      recipeSearchInput.addEventListener('input', (e) => {
+        state.recipeSearchQuery = e.target.value.toLowerCase();
+        renderRecipePool();
+      });
+
+      // Custom Plan triggers
+      btnGeneratePlan.addEventListener('click', handleGenerateMonthlyPlan);
+      btnClearCalendar.addEventListener('click', clearCurrentPlan);
+      btnExportCalendar.addEventListener('click', exportCalendarToText);
+
+      // Custom Notes save action
+      btnSaveNote.addEventListener('click', saveCustomDayNote);
+    }
+
+    function changeMonth(direction) {
+      state.currentMonth += direction;
+      if (state.currentMonth < 0) {
+        state.currentMonth = 11;
+        state.currentYear--;
+      } else if (state.currentMonth > 11) {
+        state.currentMonth = 0;
+        state.currentYear++;
+      }
+      updatePickerInputs();
+      renderCalendar();
+    }
+
+    function updatePickerInputs() {
+      const monthStr = String(state.currentMonth + 1).padStart(2, '0');
+      monthPicker.value = `${state.currentYear}-${monthStr}`;
+    }
+
+    function selectCategoryTab(e, category) {
+      document.querySelectorAll('aside border-b-2, aside [id^="tab-"]').forEach(btn => {
+        btn.classList.remove('border-emerald-600', 'text-emerald-700');
+        btn.classList.add('border-transparent', 'text-zinc-400');
+      });
+      
+      e.target.classList.remove('border-transparent', 'text-zinc-400');
+      e.target.classList.add('border-emerald-600', 'text-emerald-700');
+      
+      state.activeRecipeTab = category;
+      renderRecipePool();
+    }
+
+    // --- Google OAuth Implicit Flow Setup (No GAPI SDK initialization needed) ---
+    async function handleAuthClick() {
+      const savedClient = localStorage.getItem('google_recipe_client_id');
+      
+      if (!savedClient) {
+        showNotification("Please set your OAuth Client ID first.", "error");
+        configDrawer.classList.remove('hidden');
+        return;
+      }
+
+      if (typeof google === 'undefined' || !google.accounts) {
+        showNotification("Google accounts service script is still loading. Try again in a moment.", "error");
+        return;
+      }
+
+      try {
+        // Initialize simple Google Identity token client
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: savedClient,
+          scope: 'https://www.googleapis.com/auth/drive.readonly',
+          callback: async (tokenResponse) => {
+            if (tokenResponse.error !== undefined) {
+              showNotification(`Auth error: ${tokenResponse.error}`, "error");
+              return;
+            }
+            
+            state.accessToken = tokenResponse.access_token;
+            
+            btnConnectGoogle.classList.add('hidden');
+            btnDisconnectGoogle.classList.remove('hidden');
+            
+            await loadGoogleDriveRecipes();
+          },
+        });
+
+        tokenClient.requestAccessToken({ prompt: 'consent' });
+      } catch (err) {
+        console.error("Failed to build token client", err);
+        showNotification("OAuth client creation failed. Check console error logs.", "error");
+      }
+    }
+
+    function handleSignoutClick() {
+      if (state.accessToken) {
+        google.accounts.oauth2.revoke(state.accessToken);
+        state.accessToken = null;
+        state.recipes = [...MOCK_RECIPES];
+        state.isConnectedToDrive = false;
+        
+        btnConnectGoogle.classList.remove('hidden');
+        btnDisconnectGoogle.classList.add('hidden');
+        
+        connectionBadge.className = "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200";
+        connectionBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>Demo Mode (Offline)`;
+        driveStatsText.innerHTML = "Signed out. Displaying standard demonstrations.";
+        
+        renderRecipePool();
+        renderCalendar();
+        showNotification("Disconnected from Google Drive.", "success");
+      }
+    }
+
+    // Pull folders directly using clean fetch requests with the OAuth token
+    async function loadGoogleDriveRecipes() {
+      if (!state.accessToken) return;
+      
+      driveStatsText.innerHTML = `<span class="flex items-center gap-1"><i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i> Reading Drive folders...</span>`;
+      lucide.createIcons();
+
+      try {
+        // Find folders in User's Drive
+        const queryPart = encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and (name = 'Plant Based Recipes' or name = 'Recipes') and trashed = false");
+        const folderUrl = `https://www.googleapis.com/drive/v3/files?q=${queryPart}&fields=files(id,name)`;
+        
+        const folderResponse = await fetch(folderUrl, {
+          headers: { 'Authorization': `Bearer ${state.accessToken}` }
+        });
+
+        if (!folderResponse.ok) {
+          if (folderResponse.status === 401) {
+            handleSignoutClick();
+            showNotification("Your Google login session expired. Please sign in again.", "error");
+            return;
+          }
+          throw new Error(`Folder list API error: ${folderResponse.statusText}`);
+        }
+
+        const folderData = await folderResponse.json();
+        const folders = folderData.files;
+
+        if (!folders || folders.length === 0) {
+          showNotification("Could not find folders named 'Plant Based Recipes' or 'Recipes' in your Drive.", "error");
+          driveStatsText.textContent = "Folders not found. Please verify folder names in your Google Drive.";
+          return;
+        }
+
+        let fetchedRecipes = [];
+        let statsInfo = {};
+
+        // Find files within both folders
+        for (const folder of folders) {
+          const fileQueryPart = encodeURIComponent(`'${folder.id}' in parents and trashed = false`);
+          const filesUrl = `https://www.googleapis.com/drive/v3/files?q=${fileQueryPart}&fields=files(id,name,webViewLink)&pageSize=300`;
+          
+          const filesResponse = await fetch(filesUrl, {
+            headers: { 'Authorization': `Bearer ${state.accessToken}` }
+          });
+
+          if (!filesResponse.ok) {
+            throw new Error(`File list API error inside folder ${folder.name}`);
+          }
+
+          const fileData = await filesResponse.json();
+          const files = fileData.files || [];
+
+          const type = (folder.name.toLowerCase().includes('plant based') || folder.name.toLowerCase().includes('plantbased')) 
+            ? 'plant-based' 
+            : 'standard';
+
+          statsInfo[folder.name] = files.length;
+
+          files.forEach(file => {
+            fetchedRecipes.push({
+              id: file.id,
+              name: sanitizeFileName(file.name),
+              url: file.webViewLink || '#',
+              type: type
+            });
+          });
+        }
+
+        if (fetchedRecipes.length === 0) {
+          showNotification("Recipe folders found, but they are currently empty.", "error");
+          driveStatsText.textContent = "Google Drive connected. Target folders contain 0 recipe files.";
+          return;
+        }
+
+        state.recipes = fetchedRecipes;
+        state.isConnectedToDrive = true;
+
+        // Visual badges update
+        connectionBadge.className = "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200";
+        connectionBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span>Connected to Drive`;
+        
+        let statString = Object.entries(statsInfo).map(([name, count]) => `${name}: ${count}`).join(' | ');
+        driveStatsText.textContent = `Connected! Syncing: ${statString}`;
+        
+        renderRecipePool();
+        renderCalendar();
+        showNotification(`Synced ${fetchedRecipes.length} recipes from your Drive account!`, "success");
+
+      } catch (err) {
+        console.error("Drive folder synchronization failed", err);
+        showNotification("Failed to fetch documents. Check your Client ID configuration.", "error");
+        driveStatsText.textContent = "Sync connection failed.";
+      }
+    }
+
+    function sanitizeFileName(name) {
+      return name.replace(/\.(docx|pdf|txt|gdoc|html|xlsx|rtf)$/i, '');
+    }
+
+    // --- Template Rendering: Recipe Bank Sidebar ---
+    function renderRecipePool() {
+      recipePoolList.innerHTML = '';
+      
+      const filtered = state.recipes.filter(recipe => {
+        const matchesCategory = state.activeRecipeTab === 'all' || recipe.type === state.activeRecipeTab;
+        const matchesSearch = recipe.name.toLowerCase().includes(state.recipeSearchQuery);
+        return matchesCategory && matchesSearch;
+      });
+
+      recipeCountBadge.textContent = `${filtered.length} items`;
+
+      if (filtered.length === 0) {
+        recipePoolList.innerHTML = `
+          <div class="text-center py-8 text-zinc-400">
+            <i data-lucide="package-open" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
+            <p>No recipes match search criteria.</p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      filtered.forEach(recipe => {
+        const el = document.createElement('div');
+        el.className = `p-2.5 rounded-lg border border-zinc-200 hover:border-emerald-300 hover:bg-emerald-50/25 transition-all flex items-center justify-between gap-2 group cursor-grab active:cursor-grabbing bg-white shadow-2xs`;
+        el.draggable = true;
+        
+        el.addEventListener('dragstart', (e) => {
+          state.draggingRecipe = recipe;
+          state.draggingFromDay = null;
+          el.classList.add('opacity-40');
+          e.dataTransfer.setData('text/plain', recipe.id);
+        });
+
+        el.addEventListener('dragend', () => {
+          el.classList.remove('opacity-40');
+        });
+
+        const isPB = recipe.type === 'plant-based';
+        el.innerHTML = `
+          <div class="flex items-center gap-2 overflow-hidden">
+            <span class="p-1 rounded-md flex-shrink-0 ${isPB ? 'bg-emerald-50 text-emerald-600' : 'bg-zinc-100 text-zinc-500'}">
+              <i data-lucide="${isPB ? 'leaf' : 'beef'}" class="w-3.5 h-3.5"></i>
+            </span>
+            <span class="font-medium truncate text-zinc-700 hover:text-emerald-700" title="${recipe.name}">${recipe.name}</span>
+          </div>
+          <button onclick="window.open('${recipe.url}', '_blank')" class="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-zinc-700 rounded-md transition-all flex-shrink-0" title="Open source file link">
+            <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+          </button>
+        `;
+        recipePoolList.appendChild(el);
+      });
+
+      lucide.createIcons();
+    }
+
+    // --- Popover Month Grid Builder ---
+    function renderPopoverMonths() {
+      const container = popoverMonthSelector.querySelector('.grid');
+      container.innerHTML = '';
+      
+      MONTHS.forEach((m, idx) => {
+        const btn = document.createElement('button');
+        btn.className = `py-2 text-xs font-semibold rounded-lg transition-colors ${
+          state.currentMonth === idx && state.currentYear === parseInt(popoverYearDisplay.textContent)
+            ? 'bg-emerald-600 text-white'
+            : 'hover:bg-zinc-100 text-zinc-700'
+        }`;
+        btn.textContent = m.substring(0, 3);
+        
+        btn.addEventListener('click', () => {
+          state.currentYear = parseInt(popoverYearDisplay.textContent);
+          state.currentMonth = idx;
+          updatePickerInputs();
+          renderCalendar();
+          popoverMonthSelector.classList.add('hidden');
+        });
+
+        container.appendChild(btn);
+      });
+    }
+
+    // --- Calendar Layout Generator & Renderer ---
+    function renderCalendar() {
+      calendarHeaderTitle.textContent = `${MONTHS[state.currentMonth]} ${state.currentYear}`;
+      calendarDaysContainer.innerHTML = '';
+
+      const firstDayOfMonth = new Date(state.currentYear, state.currentMonth, 1).getDay();
+      const totalDays = new Date(state.currentYear, state.currentMonth + 1, 0).getDate();
+      const prevMonthTotalDays = new Date(state.currentYear, state.currentMonth, 0).getDate();
+
+      const monthKey = `${state.currentYear}-${String(state.currentMonth + 1).padStart(2, '0')}`;
+      const activePlan = state.calendarPlans[monthKey] || {};
+
+      // 1. Padding days from the previous month
+      for (let i = firstDayOfMonth - 1; i >= 0; i--) {
+        const dayNum = prevMonthTotalDays - i;
+        const div = document.createElement('div');
+        div.className = "bg-zinc-50/50 p-2 min-h-[90px] lg:min-h-[110px] border-r border-b border-zinc-200 text-zinc-400 select-none flex flex-col justify-between";
+        div.innerHTML = `<span class="text-xs font-medium opacity-60">${dayNum}</span>`;
+        calendarDaysContainer.appendChild(div);
+      }
+
+      // 2. Days of the Active Month
+      for (let day = 1; day <= totalDays; day++) {
+        const dayKey = `${monthKey}-${String(day).padStart(2, '0')}`;
+        const item = activePlan[dayKey] || null;
+
+        const div = document.createElement('div');
+        div.className = `bg-white p-2 min-h-[90px] lg:min-h-[110px] border-r border-b border-zinc-200 transition-all flex flex-col justify-between group relative select-none cursor-default ${
+          isToday(day) ? 'bg-emerald-50/10' : ''
+        }`;
+
+        // Highlight visual state on dragover
+        div.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          div.classList.add('bg-emerald-50/40', 'border-emerald-300');
+        });
+
+        div.addEventListener('dragleave', () => {
+          div.classList.remove('bg-emerald-50/40', 'border-emerald-300');
+        });
+
+        div.addEventListener('drop', (e) => {
+          e.preventDefault();
+          div.classList.remove('bg-emerald-50/40', 'border-emerald-300');
+          
+          if (state.draggingRecipe) {
+            assignRecipeToDay(dayKey, state.draggingRecipe);
+          } else if (state.draggingFromDay && state.draggingFromDay !== dayKey) {
+            const originDayKey = state.draggingFromDay;
+            const originPlan = activePlan[originDayKey];
+            const targetPlan = activePlan[dayKey];
+            
+            if (originPlan) {
+              activePlan[dayKey] = { ...originPlan };
+              if (targetPlan) {
+                activePlan[originDayKey] = { ...targetPlan };
+              } else {
+                delete activePlan[originDayKey];
+              }
+              state.calendarPlans[monthKey] = activePlan;
+              savePlansToStorage();
+              renderCalendar();
+            }
+          }
+        });
+
+        // Top Day Toolbar layout
+        let topBar = `
+          <div class="flex items-center justify-between mb-1">
+            <span class="inline-flex items-center justify-center w-6 h-6 text-xs font-bold rounded-full ${
+              isToday(day) ? 'bg-emerald-600 text-white shadow-xs' : 'text-zinc-600 hover:bg-zinc-100'
+            }">${day}</span>
+            <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+              ${item ? `
+                <button onclick="openNoteModal('${dayKey}')" class="p-1 hover:bg-zinc-100 rounded text-zinc-500 hover:text-emerald-700" title="Custom day note">
+                  <i data-lucide="notepad-text" class="w-3.5 h-3.5 ${item.note ? 'text-emerald-600 fill-emerald-50' : ''}"></i>
+                </button>
+                <button onclick="toggleDayLock('${dayKey}')" class="p-1 hover:bg-zinc-100 rounded text-zinc-500 hover:text-amber-700" title="Lock recipe from automatic shuffles">
+                  <i data-lucide="${item.locked ? 'lock' : 'unlock'}" class="w-3.5 h-3.5 ${item.locked ? 'text-amber-600' : ''}"></i>
+                </button>
+                <button onclick="shuffleSingleDay('${dayKey}')" class="p-1 hover:bg-zinc-100 rounded text-zinc-500 hover:text-emerald-600" title="Shuffle day recipe">
+                  <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
+                </button>
+                <button onclick="removeRecipeFromDay('${dayKey}')" class="p-1 hover:bg-zinc-100 rounded text-zinc-400 hover:text-rose-600" title="Remove meal from day">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              ` : `
+                <button onclick="openManualSelector('${dayKey}')" class="p-1 hover:bg-zinc-100 rounded text-zinc-400 hover:text-emerald-600" title="Add manual meal">
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                </button>
+              `}
+            </div>
+          </div>
+        `;
+
+        let contentArea = '';
+        if (item && item.recipe) {
+          const isPB = item.recipe.type === 'plant-based';
+          
+          contentArea = `
+            <div class="mt-1 flex-1 flex flex-col justify-between">
+              <div class="draggable-day-plan cursor-grab active:cursor-grabbing p-1.5 rounded-lg border ${
+                isPB 
+                  ? 'bg-emerald-50/50 border-emerald-100 text-emerald-900 hover:border-emerald-300' 
+                  : 'bg-zinc-50/50 border-zinc-100 text-zinc-800 hover:border-zinc-300'
+              } transition-all" draggable="true">
+                <div class="flex items-start gap-1">
+                  <span class="mt-0.5 flex-shrink-0 ${isPB ? 'text-emerald-600' : 'text-zinc-400'}">
+                    <i data-lucide="${isPB ? 'leaf' : 'beef'}" class="w-3.5 h-3.5"></i>
+                  </span>
+                  <a href="${item.recipe.url}" target="_blank" class="text-xs font-semibold leading-tight line-clamp-2 hover:underline select-text" title="Click to view file source">
+                    ${item.recipe.name}
+                  </a>
+                </div>
+              </div>
+              
+              <!-- Indicator Flags -->
+              <div class="flex items-center gap-1.5 mt-1.5 px-0.5">
+                ${item.note ? `
+                  <span class="text-[10px] text-emerald-600 font-medium truncate flex items-center gap-0.5 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100/50 max-w-full" title="Note: ${item.note}">
+                    <i data-lucide="pencil" class="w-2.5 h-2.5"></i> ${item.note}
+                  </span>
+                ` : ''}
+                ${item.locked ? `
+                  <span class="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 px-1 rounded flex items-center gap-0.5 font-medium flex-shrink-0">
+                    <i data-lucide="lock" class="w-2.5 h-2.5"></i> Saved
+                  </span>
+                ` : ''}
+              </div>
+            </div>
+          `;
+
+          // Track calendar source dragging
+          div.addEventListener('dragstart', (e) => {
+            state.draggingRecipe = null;
+            state.draggingFromDay = dayKey;
+            e.dataTransfer.setData('text/plain', dayKey);
+          });
+        } else {
+          // Empty state view
+          contentArea = `
+            <div class="flex-1 flex items-center justify-center border border-dashed border-zinc-200 rounded-lg m-1 group-hover:border-zinc-300 transition-colors py-2">
+              <span class="text-[10px] text-zinc-400 flex items-center gap-1 font-medium group-hover:text-zinc-500">
+                <i data-lucide="plus-circle" class="w-3 h-3"></i> Add Meal
+              </span>
+            </div>
+          `;
+          
+          div.addEventListener('click', () => openManualSelector(dayKey));
+        }
+
+        div.innerHTML = `${topBar}${contentArea}`;
+        calendarDaysContainer.appendChild(div);
+      }
+
+      // 3. Grid-filling days belonging to the next month to preserve alignment grid structure
+      const renderedTotal = firstDayOfMonth + totalDays;
+      const trailingPadding = (7 - (renderedTotal % 7)) % 7;
+      for (let i = 1; i <= trailingPadding; i++) {
+        const div = document.createElement('div');
+        div.className = "bg-zinc-50/50 p-2 min-h-[90px] lg:min-h-[110px] border-r border-b border-zinc-200 text-zinc-400 select-none flex flex-col justify-between";
+        div.innerHTML = `<span class="text-xs font-medium opacity-60">${i}</span>`;
+        calendarDaysContainer.appendChild(div);
+      }
+
+      // Initialize loaded dynamic elements
+      lucide.createIcons();
+    }
+
+    function isToday(day) {
+      const today = new Date();
+      return today.getFullYear() === state.currentYear && 
+             today.getMonth() === state.currentMonth && 
+             today.getDate() === day;
+    }
+
+    // --- State Operations: Assign and Alter Schedules ---
+    function assignRecipeToDay(dayKey, recipe) {
+      const monthKey = `${state.currentYear}-${String(state.currentMonth + 1).padStart(2, '0')}`;
+      if (!state.calendarPlans[monthKey]) {
+        state.calendarPlans[monthKey] = {};
+      }
+      
+      const existing = state.calendarPlans[monthKey][dayKey] || {};
+      state.calendarPlans[monthKey][dayKey] = {
+        recipe: { ...recipe },
+        note: existing.note || '',
+        locked: existing.locked !== undefined ? existing.locked : false
+      };
+
+      savePlansToStorage();
+      renderCalendar();
+    }
+
+    function removeRecipeFromDay(dayKey) {
+      const monthKey = `${state.currentYear}-${String(state.currentMonth + 1).padStart(2, '0')}`;
+      if (state.calendarPlans[monthKey] && state.calendarPlans[monthKey][dayKey]) {
+        delete state.calendarPlans[monthKey][dayKey];
+        savePlansToStorage();
+        renderCalendar();
+      }
+    }
+
+    function toggleDayLock(dayKey) {
+      const monthKey = `${state.currentYear}-${String(state.currentMonth + 1).padStart(2, '0')}`;
+      const plan = state.calendarPlans[monthKey];
+      if (plan && plan[dayKey]) {
+        plan[dayKey].locked = !plan[dayKey].locked;
+        savePlansToStorage();
+        renderCalendar();
+      }
+    }
+
+    function shuffleSingleDay(dayKey) {
+      const generationMode = document.querySelector('input[name="generation-mode"]:checked').value;
+      const candidates = getCandidateRecipes(generationMode);
+      
+      if (candidates.length === 0) {
+        showNotification("No recipe candidates found in selected category.", "error");
+        return;
+      }
+
+      const randomRecipe = candidates[Math.floor(Math.random() * candidates.length)];
+      assignRecipeToDay(dayKey, randomRecipe);
+    }
+
+    function openManualSelector(dayKey) {
+      const list = document.createElement('div');
+      list.className = "fixed inset-0 bg-zinc-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4";
+      
+      const filteredRecipes = state.recipes;
+      
+      let listItems = filteredRecipes.map(recipe => {
+        const isPB = recipe.type === 'plant-based';
+        return `
+          <button onclick="selectManualRecipe('${dayKey}', '${recipe.id}'); this.parentElement.parentElement.parentElement.remove()" class="w-full text-left p-2.5 hover:bg-zinc-50 rounded-lg text-xs font-semibold flex items-center gap-2 border border-transparent hover:border-zinc-200 transition-all">
+            <span class="p-1 rounded ${isPB ? 'bg-emerald-50 text-emerald-600' : 'bg-zinc-100 text-zinc-500'}">
+              <i data-lucide="${isPB ? 'leaf' : 'beef'}" class="w-3.5 h-3.5"></i>
+            </span>
+            <span class="truncate text-zinc-700">${recipe.name}</span>
+          </button>
+        `;
+      }).join('');
+
+      list.innerHTML = `
+        <div class="bg-white rounded-xl border border-zinc-200 shadow-2xl p-5 max-w-sm w-full flex flex-col max-h-[400px]">
+          <div class="flex items-center justify-between pb-3 border-b border-zinc-100 mb-3">
+            <h3 class="text-sm font-bold text-zinc-800">Assign Recipe to Day</h3>
+            <button onclick="this.parentElement.parentElement.parentElement.remove()" class="text-zinc-400 hover:text-zinc-600">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto custom-scrollbar space-y-1 pr-1">
+            ${listItems.length ? listItems : '<div class="text-center py-4 text-zinc-400">No recipes loaded. Try syncing your Google account first.</div>'}
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(list);
+      lucide.createIcons();
+    }
+
+    window.selectManualRecipe = function(dayKey, recipeId) {
+      const recipe = state.recipes.find(r => r.id === recipeId);
+      if (recipe) {
+        assignRecipeToDay(dayKey, recipe);
+      }
+    };
+
+    // --- Core Automated Schedule Generation ---
+    function handleGenerateMonthlyPlan() {
+      const monthKey = `${state.currentYear}-${String(state.currentMonth + 1).padStart(2, '0')}`;
+      const totalDays = new Date(state.currentYear, state.currentMonth + 1, 0).getDate();
+      
+      const generationMode = document.querySelector('input[name="generation-mode"]:checked').value;
+      const candidates = getCandidateRecipes(generationMode);
+
+      if (candidates.length === 0) {
+        showNotification("No recipe items loaded in current category! Verify connection.", "error");
+        return;
+      }
+
+      if (!state.calendarPlans[monthKey]) {
+        state.calendarPlans[monthKey] = {};
+      }
+
+      const activePlan = state.calendarPlans[monthKey];
+      let overwriteCount = 0;
+
+      for (let day = 1; day <= totalDays; day++) {
+        const dayKey = `${monthKey}-${String(day).padStart(2, '0')}`;
+        const existing = activePlan[dayKey];
+        
+        if (existing && existing.locked) continue;
+
+        let selectedRecipe;
+        if (generationMode === 'alternating') {
+          const preferredType = (day % 2 === 0) ? 'plant-based' : 'standard';
+          let typeFiltered = candidates.filter(r => r.type === preferredType);
+          if (typeFiltered.length === 0) typeFiltered = candidates; // Fallback
+          selectedRecipe = typeFiltered[Math.floor(Math.random() * typeFiltered.length)];
+        } else {
+          selectedRecipe = candidates[Math.floor(Math.random() * candidates.length)];
+        }
+
+        activePlan[dayKey] = {
+          recipe: { ...selectedRecipe },
+          note: existing ? existing.note : '',
+          locked: false
+        };
+        overwriteCount++;
+      }
+
+      state.calendarPlans[monthKey] = activePlan;
+      savePlansToStorage();
+      renderCalendar();
+      showNotification(`Generated schedule covering ${overwriteCount} days. Saved choices are preserved!`, "success");
+    }
+
+    function getCandidateRecipes(mode) {
+      if (mode === 'plant-based') {
+        return state.recipes.filter(r => r.type === 'plant-based');
+      } else if (mode === 'standard') {
+        return state.recipes.filter(r => r.type === 'standard');
+      }
+      return state.recipes;
+    }
+
+    function clearCurrentPlan() {
+      const monthKey = `${state.currentYear}-${String(state.currentMonth + 1).padStart(2, '0')}`;
+      if (state.calendarPlans[monthKey]) {
+        delete state.calendarPlans[monthKey];
+        savePlansToStorage();
+        renderCalendar();
+        showNotification("Cleared schedule configuration for current month.", "success");
+      }
+    }
+
+    // --- Notes Modal Logic ---
+    window.openNoteModal = function(dayKey) {
+      const monthKey = `${state.currentYear}-${String(state.currentMonth + 1).padStart(2, '0')}`;
+      const dayStr = dayKey.split('-').pop();
+      const plan = state.calendarPlans[monthKey]?.[dayKey];
+
+      if (!plan) return;
+
+      modalDayBadge.textContent = `${MONTHS[state.currentMonth]} ${dayStr}, ${state.currentYear}`;
+      modalTargetDate.value = dayKey;
+      modalNoteText.value = plan.note || '';
+
+      modalNotes.showModal();
+    };
+
+    function saveCustomDayNote() {
+      const dayKey = modalTargetDate.value;
+      const monthKey = `${state.currentYear}-${String(state.currentMonth + 1).padStart(2, '0')}`;
+      const plan = state.calendarPlans[monthKey]?.[dayKey];
+
+      if (plan) {
+        plan.note = modalNoteText.value.trim();
+        savePlansToStorage();
+        renderCalendar();
+        modalNotes.close();
+        showNotification("Notes updated.", "success");
+      }
+    }
+
+    function savePlansToStorage() {
+      localStorage.setItem('recipe_calendar_plans', JSON.stringify(state.calendarPlans));
+    }
+
+    // --- Export as Plain text list ---
+    function exportCalendarToText() {
+      const monthKey = `${state.currentYear}-${String(state.currentMonth + 1).padStart(2, '0')}`;
+      const plan = state.calendarPlans[monthKey];
+
+      if (!plan || Object.keys(plan).length === 0) {
+        showNotification("No generated plan exists to export for this month.", "error");
+        return;
+      }
+
+      let output = `MEAL SCHEDULE PLAN - ${MONTHS[state.currentMonth].toUpperCase()} ${state.currentYear}\n`;
+      output += "=========================================\n\n";
+
+      const totalDays = new Date(state.currentYear, state.currentMonth + 1, 0).getDate();
+      for (let d = 1; d <= totalDays; d++) {
+        const dayKey = `${monthKey}-${String(d).padStart(2, '0')}`;
+        const item = plan[dayKey];
+        
+        if (item && item.recipe) {
+          const typeLabel = item.recipe.type === 'plant-based' ? '[Plant-Based]' : '[Standard]';
+          output += `Day ${String(d).padStart(2, '0')}: ${item.recipe.name} ${typeLabel}\n`;
+          if (item.recipe.url && item.recipe.url !== '#') {
+            output += `        Link: ${item.recipe.url}\n`;
+          }
+          if (item.note) {
+            output += `        Notes: ${item.note}\n`;
+          }
+          output += `\n`;
+        } else {
+          output += `Day ${String(d).padStart(2, '0')}: [No meal planned]\n\n`;
+        }
+      }
+
+      const blob = new Blob([output], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Meal-Plan-${MONTHS[state.currentMonth]}-${state.currentYear}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      showNotification("Schedule file downloaded successfully.", "success");
+    }
+
+    // --- Notification Feedback Helper ---
+    function showNotification(message, type = 'success') {
+      const container = document.getElementById('notification-container');
+      const toast = document.createElement('div');
+      
+      toast.className = `p-3 px-4 rounded-xl shadow-lg text-white font-medium flex items-center justify-between gap-3 transition-all duration-300 transform translate-y-2 opacity-0 text-xs ${
+        type === 'success' ? 'bg-zinc-900 border border-zinc-800' : 'bg-rose-600'
+      }`;
+      
+      toast.innerHTML = `
+        <span class="flex items-center gap-1.5">
+          <i data-lucide="${type === 'success' ? 'check-circle' : 'alert-circle'}" class="w-4 h-4 flex-shrink-0"></i>
+          <span>${message}</span>
+        </span>
+        <button onclick="this.parentElement.remove()" class="text-white/60 hover:text-white transition-colors flex-shrink-0">
+          <i data-lucide="x" class="w-3.5 h-3.5"></i>
+        </button>
+      `;
+      
+      container.appendChild(toast);
+      lucide.createIcons();
+      
+      setTimeout(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      }, 10);
+      
+      setTimeout(() => {
+        toast.classList.add('translate-y-2', 'opacity-0');
+        setTimeout(() => toast.remove(), 300);
+      }, 4500);
+    }
+  </script>
+</body>
+</html>
