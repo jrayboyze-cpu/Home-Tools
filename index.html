@@ -459,6 +459,7 @@
         const sharedClientId = hashParams.get('client_id');
         if (sharedClientId) {
           localStorage.setItem('google_recipe_client_id', decodeURIComponent(sharedClientId));
+          localStorage.setItem('is_shared_user', 'true');
           
           // Clear hash to hide the raw client ID in browser URL bar
           history.replaceState(null, null, window.location.pathname);
@@ -470,6 +471,16 @@
     // Handle LocalStorage loading
     function loadSavedData() {
       const savedClient = localStorage.getItem('google_recipe_client_id');
+      const isSharedUser = localStorage.getItem('is_shared_user') === 'true';
+      const toggleConfigBtn = document.getElementById('toggle-config-btn');
+
+      // Hide the gear configuration icon if opened via the share link
+      if (isSharedUser && toggleConfigBtn) {
+        toggleConfigBtn.classList.add('hidden');
+      } else if (toggleConfigBtn) {
+        toggleConfigBtn.classList.remove('hidden');
+      }
+
       if (savedClient) {
         inputClientId.value = savedClient;
         sidebarSyncCard.classList.remove('hidden');
@@ -506,6 +517,8 @@
           return;
         }
         localStorage.setItem('google_recipe_client_id', client);
+        localStorage.setItem('is_shared_user', 'false'); // Set as master view
+        if (toggleConfigBtn) toggleConfigBtn.classList.remove('hidden');
         sidebarSyncCard.classList.remove('hidden');
         configDrawer.classList.add('hidden');
         showNotification("Client ID saved. Cloud Connection card is active.", "success");
@@ -514,7 +527,9 @@
       btnClearCredentials.addEventListener('click', () => {
         inputClientId.value = '';
         localStorage.removeItem('google_recipe_client_id');
+        localStorage.removeItem('is_shared_user');
         sidebarSyncCard.classList.add('hidden');
+        if (toggleConfigBtn) toggleConfigBtn.classList.remove('hidden');
         handleSignoutClick();
         showNotification("Cleared saved Google API configurations.", "success");
       });
@@ -1337,4 +1352,3 @@
   </script>
 </body>
 </html>
-```eof
