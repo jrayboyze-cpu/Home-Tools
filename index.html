@@ -688,6 +688,8 @@
   // ============================================================
   //  GOOGLE DRIVE — AUTH
   // ============================================================
+  let pendingTokenReject = null;
+
   function ensureTokenClient() {
     if (typeof google === 'undefined' || !google.accounts) {
       showNotification('Google sign-in library is still loading — try again in a moment.', 'error');
@@ -698,25 +700,38 @@
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: settings.clientId,
         scope: DRIVE_SCOPES,
-        callback: () => {}
+        callback: () => {},
+        error_callback: (err) => {
+          if (pendingTokenReject) {
+            const rej = pendingTokenReject;
+            pendingTokenReject = null;
+            rej(new Error(err && err.type ? err.type : 'auth-error'));
+          }
+        }
       });
     }
     return tokenClient;
   }
 
-  function requestToken({ silent = false } = {}) {
+  // Empty prompt = Google only shows UI when it has to. First-time users get
+  // the consent screen once; after that, reconnects are silent or one click.
+  function requestToken() {
     return new Promise((resolve, reject) => {
       const tc = ensureTokenClient();
       if (!tc) return reject(new Error('no-client'));
+      pendingTokenReject = reject;
       tc.callback = (resp) => {
+        pendingTokenReject = null;
         if (resp.error) return reject(new Error(resp.error));
         state.accessToken = resp.access_token;
+        settings.grantedOnce = true;
+        saveSettings();
         saveToken(resp.access_token, resp.expires_in || 3600);
         resolve(resp.access_token);
       };
       try {
-        tc.requestAccessToken({ prompt: silent ? '' : 'consent' });
-      } catch (e) { reject(e); }
+        tc.requestAccessToken({ prompt: '' });
+      } catch (e) { pendingTokenReject = null; reject(e); }
     });
   }
 
@@ -727,9 +742,9 @@
     });
     let resp = await doFetch();
     if (resp.status === 401) {
-      // token expired mid-session: try a silent refresh once
+      // token expired mid-session: try a quiet refresh once
       try {
-        await requestToken({ silent: true });
+        await requestToken();
         resp = await doFetch();
       } catch (e) {
         setDisconnectedUI();
@@ -741,7 +756,7 @@
 
   async function signIn(interactive = true) {
     try {
-      await requestToken({ silent: !interactive });
+      await requestToken();
       return true;
     } catch (e) {
       if (interactive) showNotification('Google sign-in failed: ' + e.message, 'error');
@@ -768,8 +783,9 @@
     const folders = [];
     let pageToken = '';
     do {
-      const q = encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'me' in owners");
-      const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name,parents)&pageSize=1000&orderBy=name${pageToken ? '&pageToken=' + pageToken : ''}`;
+      // no ownership filter: include folders shared with the user and shared drives
+      const q = encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false");
+      const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name,parents)&pageSize=1000&orderBy=name&corpora=allDrives&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? '&pageToken=' + pageToken : ''}`;
       const resp = await driveFetch(url);
       if (!resp.ok) throw new Error('Could not list Drive folders');
       const data = await resp.json();
@@ -782,7 +798,7 @@
   // Preview the first few files inside a folder (for the wizard's eye button)
   async function peekFolderFiles(folderId) {
     const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
-    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(name,mimeType)&pageSize=8&orderBy=name`;
+    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(name,mimeType)&pageSize=8&orderBy=name&supportsAllDrives=true&includeItemsFromAllDrives=true`;
     const resp = await driveFetch(url);
     if (!resp.ok) throw new Error('Could not read folder contents');
     return (await resp.json()).files || [];
@@ -797,7 +813,7 @@
       const statsInfo = {};
       for (const folder of settings.folderConfigs) {
         const q = encodeURIComponent(`'${folder.id}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'`);
-        const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,webViewLink)&pageSize=500`;
+        const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,webViewLink)&pageSize=500&supportsAllDrives=true&includeItemsFromAllDrives=true`;
         const resp = await driveFetch(url);
         if (!resp.ok) throw new Error(`Failed reading folder "${folder.name}"`);
         const files = (await resp.json()).files || [];
@@ -2207,11 +2223,26 @@
     lucide.createIcons();
 
     // seamless reconnect: valid token from a previous session?
-    const savedToken = loadValidToken();
-    if (savedToken && settings.clientId && settings.folderConfigs.length) {
-      state.accessToken = savedToken;
-      const ok = await syncRecipesFromDrive();
-      if (ok) loadStateFromDrive();
+    if (settings.clientId && settings.folderConfigs.length) {
+      const savedToken = loadValidToken();
+      if (savedToken) {
+        state.accessToken = savedToken;
+        const ok = await syncRecipesFromDrive();
+        if (ok) loadStateFromDrive();
+      } else if (settings.grantedOnce) {
+        // token expired but the user granted access before: try a silent
+        // re-auth (works when the Google session is alive). Wait for the GIS
+        // script, then fail quietly — the sidebar button remains as fallback.
+        const tryQuiet = async () => {
+          try {
+            await requestToken();
+            const ok = await syncRecipesFromDrive();
+            if (ok) loadStateFromDrive();
+          } catch (e) { /* user reconnects via sidebar with one click */ }
+        };
+        if (typeof google !== 'undefined' && google.accounts) tryQuiet();
+        else setTimeout(() => { if (typeof google !== 'undefined' && google.accounts) tryQuiet(); }, 1500);
+      }
     }
   });
   </script>
