@@ -414,8 +414,9 @@
       <!-- STEP 2: Sign in -->
       <div id="sync-step-2" class="sync-step hidden space-y-4">
         <p class="text-xs text-zinc-600 leading-relaxed">
-          Sign in with the Google account that holds your recipe folders. The app requests
-          <strong>read-only</strong> access to Drive files plus a small hidden app-data space to back up your meal history.
+          Sign in with your Google account. The app requests Drive access to read your recipe
+          folders and to keep one small shared data file (<code>meal-planner-data.json</code>) in sync,
+          so everyone in the household sees the same live dashboard.
         </p>
         <button id="btn-wizard-signin" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2">
           <i data-lucide="log-in" class="w-4 h-4"></i> Sign in with Google
@@ -455,7 +456,7 @@
           <button id="btn-share-link" class="border border-zinc-200 hover:bg-zinc-50 text-zinc-700 text-xs font-semibold py-2.5 rounded-lg flex items-center justify-center gap-1.5"><i data-lucide="share-2" class="w-3.5 h-3.5"></i> Copy family link</button>
           <button id="btn-signout" class="border border-rose-200 hover:bg-rose-50 text-rose-600 text-xs font-semibold py-2.5 rounded-lg flex items-center justify-center gap-1.5"><i data-lucide="log-out" class="w-3.5 h-3.5"></i> Sign out</button>
         </div>
-        <p class="text-[10px] text-zinc-400 leading-relaxed">Your meal history, nutrition data and recipe tags are automatically backed up to a hidden app folder in this Google account whenever they change.</p>
+        <p class="text-[10px] text-zinc-400 leading-relaxed">Your household shares one live data file in Drive (<code>meal-planner-data.json</code>, stored in your first recipe folder). Everyone connected sees the same calendar, history, nutrition and insights — changes sync automatically within about 30 seconds.</p>
       </div>
     </div>
   </dialog>
@@ -534,8 +535,11 @@
     token: 'mp2_token',          // { accessToken, expiresAt }
     recipeCache: 'mp2_recipe_cache'
   };
-  const DRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.appdata';
-  const APPDATA_FILENAME = 'meal-planner-data.json';
+  // Full Drive scope: needed to read recipe folders AND keep one shared
+  // household data file in sync (readable/writable by every family member).
+  const DRIVE_SCOPES = 'https://www.googleapis.com/auth/drive';
+  const DATA_FILENAME = 'meal-planner-data.json';
+  const TOMBSTONE_TTL = 60 * 24 * 3600 * 1000; // keep deletions 60 days so they propagate
 
   // ============================================================
   //  STATE
@@ -557,11 +561,10 @@
     nutritionRange: 'month',
     librarySearch: '',
     libraryFilter: 'all',
-    appDataFileId: null,
     lastSyncedAt: null
   };
 
-  let settings = { clientId: '', isSharedUser: false, folderConfigs: [] };
+  let settings = { clientId: '', isSharedUser: false, folderConfigs: [], dataFileId: '', grantedOnce: false };
   let tokenClient = null;
   let driveBackupTimer = null;
   let wizardFolderChoices = []; // temp state for step 3
@@ -641,7 +644,7 @@
 
     try {
       const s = JSON.parse(localStorage.getItem(LS.settings) || 'null');
-      if (s) settings = { clientId: '', isSharedUser: false, folderConfigs: [], ...s };
+      if (s) settings = { clientId: '', isSharedUser: false, folderConfigs: [], dataFileId: '', grantedOnce: false, ...s };
       else if (v1Client) {
         settings.clientId = v1Client;
         settings.isSharedUser = localStorage.getItem('is_shared_user') === 'true';
@@ -848,72 +851,137 @@
   }
 
   // ============================================================
-  //  GOOGLE DRIVE — APP DATA BACKUP (meal history / meta)
+  //  GOOGLE DRIVE — SHARED HOUSEHOLD DATA FILE
+  //  One JSON file lives next to the recipe folders; every family
+  //  member reads/writes the same file, merged by per-entry timestamps.
   // ============================================================
-  async function findAppDataFile() {
-    if (state.appDataFileId) return state.appDataFileId;
-    const url = `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${encodeURIComponent(`name = '${APPDATA_FILENAME}'`)}&fields=files(id,modifiedTime)`;
-    const resp = await driveFetch(url);
-    if (!resp.ok) return null;
-    const files = (await resp.json()).files || [];
-    if (files.length) { state.appDataFileId = files[0].id; return files[0].id; }
-    return null;
+  function currentStateJson() {
+    return JSON.stringify({
+      calendarPlans: state.calendarPlans,
+      recipeMeta: state.recipeMeta,
+      updatedAt: state.updatedAt || Date.now()
+    });
   }
 
-  async function saveStateToDrive() {
-    if (!state.accessToken) return;
-    try {
-      const payload = JSON.stringify({
-        calendarPlans: state.calendarPlans,
-        recipeMeta: state.recipeMeta,
-        updatedAt: state.updatedAt
+  async function ensureDataFile() {
+    if (settings.dataFileId) return settings.dataFileId;
+    // look for an existing household file anywhere we can see
+    const q = encodeURIComponent(`name = '${DATA_FILENAME}' and trashed = false`);
+    const resp = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&pageSize=5&corpora=allDrives&supportsAllDrives=true&includeItemsFromAllDrives=true`);
+    if (resp.ok) {
+      const files = (await resp.json()).files || [];
+      if (files.length) { settings.dataFileId = files[0].id; saveSettings(); return files[0].id; }
+    }
+    // create it inside the first recipe folder so Drive folder-sharing covers it
+    const parents = settings.folderConfigs[0] ? [settings.folderConfigs[0].id] : [];
+    const boundary = 'mp_boundary_' + Date.now();
+    const body =
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+      JSON.stringify({ name: DATA_FILENAME, parents }) +
+      `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${currentStateJson()}\r\n--${boundary}--`;
+    const createResp = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
+      method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body
+    });
+    if (!createResp.ok) throw new Error('Could not create the shared data file');
+    const j = await createResp.json();
+    settings.dataFileId = j.id;
+    saveSettings();
+    return j.id;
+  }
+
+  // Per-entry merge: for each calendar day / recipe override, the copy with
+  // the newer timestamp wins. Deletions travel as {deleted:true,t} tombstones.
+  function mergeStates(local, remote) {
+    const pickNewer = (x, y) => (!x ? y : !y ? x : ((x.t || 0) >= (y.t || 0) ? x : y));
+    const plans = {};
+    const months = new Set([...Object.keys(local.calendarPlans || {}), ...Object.keys(remote.calendarPlans || {})]);
+    months.forEach(m => {
+      const lm = (local.calendarPlans || {})[m] || {}, rm = (remote.calendarPlans || {})[m] || {};
+      const out = {};
+      new Set([...Object.keys(lm), ...Object.keys(rm)]).forEach(d => {
+        const pick = pickNewer(lm[d], rm[d]);
+        if (pick) out[d] = pick;
       });
-      const fileId = await findAppDataFile();
-      let resp;
-      if (fileId) {
-        resp = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: payload
-        });
-      } else {
-        const boundary = 'mp_boundary_' + Date.now();
-        const body =
-          `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
-          JSON.stringify({ name: APPDATA_FILENAME, parents: ['appDataFolder'] }) +
-          `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${payload}\r\n--${boundary}--`;
-        resp = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-          method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body
-        });
-        if (resp.ok) { const j = await resp.json(); state.appDataFileId = j.id; }
-      }
-      if (resp && resp.ok) updateBackupIndicator(true);
-    } catch (e) { console.warn('Drive backup failed', e); }
+      if (Object.keys(out).length) plans[m] = out;
+    });
+    const meta = {};
+    new Set([...Object.keys(local.recipeMeta || {}), ...Object.keys(remote.recipeMeta || {})]).forEach(k => {
+      const pick = pickNewer((local.recipeMeta || {})[k], (remote.recipeMeta || {})[k]);
+      if (pick) meta[k] = pick;
+    });
+    return { calendarPlans: plans, recipeMeta: meta, updatedAt: Math.max(local.updatedAt || 0, remote.updatedAt || 0) };
   }
 
-  async function loadStateFromDrive() {
-    if (!state.accessToken) return;
+  function pruneTombstones() {
+    const cutoff = Date.now() - TOMBSTONE_TTL;
+    for (const [m, days] of Object.entries(state.calendarPlans)) {
+      for (const [d, item] of Object.entries(days)) {
+        if (item && item.deleted && (item.t || 0) < cutoff) delete days[d];
+      }
+      if (!Object.keys(days).length) delete state.calendarPlans[m];
+    }
+  }
+
+  let syncInFlight = false;
+  // Pull remote, merge, adopt what's newer, push back anything we have that's
+  // newer. Used both after local edits (debounced) and on the poll timer.
+  async function syncSharedData({ notify = false } = {}) {
+    if (!state.accessToken || syncInFlight) return;
+    syncInFlight = true;
     try {
-      const fileId = await findAppDataFile();
-      if (!fileId) return;
-      const resp = await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
-      if (!resp.ok) return;
-      const remote = await resp.json();
-      if (remote && remote.updatedAt && remote.updatedAt > (state.updatedAt || 0)) {
-        state.calendarPlans = remote.calendarPlans || state.calendarPlans;
-        state.recipeMeta = remote.recipeMeta || state.recipeMeta;
-        state.updatedAt = remote.updatedAt;
+      const fileId = await ensureDataFile();
+      let remote = null;
+      const r = await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`);
+      if (r.ok) remote = await r.json().catch(() => null);
+      if (!remote || typeof remote !== 'object') remote = { calendarPlans: {}, recipeMeta: {}, updatedAt: 0 };
+
+      const localSnap = { calendarPlans: state.calendarPlans, recipeMeta: state.recipeMeta, updatedAt: state.updatedAt || 0 };
+      const merged = mergeStates(localSnap, remote);
+      const localStr = JSON.stringify({ a: localSnap.calendarPlans, b: localSnap.recipeMeta });
+      const mergedStr = JSON.stringify({ a: merged.calendarPlans, b: merged.recipeMeta });
+      const remoteStr = JSON.stringify({ a: remote.calendarPlans || {}, b: remote.recipeMeta || {} });
+
+      if (mergedStr !== localStr) {
+        // the other person changed something — adopt it
+        state.calendarPlans = merged.calendarPlans;
+        state.recipeMeta = merged.recipeMeta;
+        state.updatedAt = merged.updatedAt;
         localStorage.setItem(LS.data, JSON.stringify({ calendarPlans: state.calendarPlans, recipeMeta: state.recipeMeta, updatedAt: state.updatedAt }));
         renderAll();
-        showNotification('Loaded newer meal history from your Drive backup.', 'success');
+        if (notify) showNotification('Updated with the latest changes from your household.', 'success');
       }
-    } catch (e) { console.warn('Drive restore failed', e); }
+      if (mergedStr !== remoteStr) {
+        // we hold newer entries — write the merged result back
+        pruneTombstones();
+        const up = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: currentStateJson()
+        });
+        if (up.ok) updateBackupIndicator(true);
+      } else {
+        updateBackupIndicator(true);
+      }
+    } catch (e) {
+      if (e.message !== 'auth-expired') console.warn('Shared data sync failed', e);
+    } finally {
+      syncInFlight = false;
+    }
   }
 
   function scheduleDriveBackup() {
     if (!state.accessToken) return;
     updateBackupIndicator(false);
     clearTimeout(driveBackupTimer);
-    driveBackupTimer = setTimeout(saveStateToDrive, 3000);
+    driveBackupTimer = setTimeout(() => syncSharedData(), 2500);
   }
+
+  let pollTimer = null;
+  function startPolling() {
+    clearInterval(pollTimer);
+    pollTimer = setInterval(() => {
+      if (state.isConnectedToDrive && !document.hidden) syncSharedData({ notify: true });
+    }, 30000);
+  }
+  function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
 
   function updateBackupIndicator(saved) {
     const el = $('sidebar-sync-stats');
@@ -930,12 +998,14 @@
     badge.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200';
     badge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span>Drive Connected';
     let statStr = statsInfo ? Object.entries(statsInfo).map(([n, c]) => `${escapeHtml(n)}: ${c}`).join(' · ') : `${state.recipes.length} recipes`;
-    $('sidebar-sync-stats').innerHTML = `${statStr}<br><span data-backup class="text-[10px] opacity-70">Backed up ✓</span>`;
+    $('sidebar-sync-stats').innerHTML = `${statStr}<br><span data-backup class="text-[10px] opacity-70">Household data synced ✓</span>`;
+    startPolling();
     renderSyncUI();
   }
 
   function setDisconnectedUI() {
     state.isConnectedToDrive = false;
+    stopPolling();
     const badge = $('connection-badge');
     const hasCache = !!state.lastSyncedAt;
     badge.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200';
@@ -966,7 +1036,7 @@
     const ok = await signIn(true);
     if (!ok) return;
     await syncRecipesFromDrive();
-    await loadStateFromDrive();
+    await syncSharedData({ notify: true });
   }
 
   function showWizardStep(n) {
@@ -1132,7 +1202,7 @@
     const tMax = to || todayStr(); // history never includes the future
     for (const [monthKey, days] of Object.entries(state.calendarPlans)) {
       for (const [dateStr, item] of Object.entries(days)) {
-        if (!item || !item.recipe) continue;
+        if (!item || !item.recipe || item.deleted) continue;
         if (dateStr > tMax) continue;
         if (from && dateStr < from) continue;
         const status = entryStatus(dateStr, item);
@@ -1309,7 +1379,8 @@
 
     for (let day = 1; day <= totalDays; day++) {
       const dayKey = `${monthKey}-${String(day).padStart(2, '0')}`;
-      const item = activePlan[dayKey] || null;
+      const rawItem = activePlan[dayKey];
+      const item = (rawItem && rawItem.recipe && !rawItem.deleted) ? rawItem : null;
       const isPast = dayKey < tStr;
       const status = item ? entryStatus(dayKey, item) : null;
 
@@ -1328,11 +1399,12 @@
         } else if (state.draggingFromDay && state.draggingFromDay !== dayKey) {
           const plan = state.calendarPlans[monthKey] || {};
           const origin = plan[state.draggingFromDay];
-          if (origin) {
-            const target = plan[dayKey];
-            plan[dayKey] = { ...origin };
-            if (target) plan[state.draggingFromDay] = { ...target };
-            else delete plan[state.draggingFromDay];
+          if (origin && origin.recipe && !origin.deleted) {
+            const rawTarget = plan[dayKey];
+            const target = (rawTarget && rawTarget.recipe && !rawTarget.deleted) ? rawTarget : null;
+            plan[dayKey] = { ...origin, t: Date.now() };
+            if (target) plan[state.draggingFromDay] = { ...target, t: Date.now() };
+            else plan[state.draggingFromDay] = { deleted: true, t: Date.now() };
             state.calendarPlans[monthKey] = plan;
             persistLocal();
             renderCalendar();
@@ -1414,12 +1486,14 @@
   function assignRecipeToDay(dayKey, recipe) {
     const mk = monthKeyOfDay(dayKey);
     if (!state.calendarPlans[mk]) state.calendarPlans[mk] = {};
-    const existing = state.calendarPlans[mk][dayKey] || {};
+    const raw = state.calendarPlans[mk][dayKey];
+    const existing = (raw && !raw.deleted) ? raw : {};
     state.calendarPlans[mk][dayKey] = {
       recipe: { id: recipe.id, name: recipe.name, url: recipe.url, type: recipe.type },
       note: existing.note || '',
       locked: existing.locked || false,
-      status: existing.status || ''
+      status: existing.status || '',
+      t: Date.now()
     };
     persistLocal();
     renderCalendar();
@@ -1428,7 +1502,8 @@
   window.removeRecipeFromDay = function(dayKey) {
     const mk = monthKeyOfDay(dayKey);
     if (state.calendarPlans[mk] && state.calendarPlans[mk][dayKey]) {
-      delete state.calendarPlans[mk][dayKey];
+      // tombstone instead of hard delete so removal syncs to the household
+      state.calendarPlans[mk][dayKey] = { deleted: true, t: Date.now() };
       persistLocal();
       renderCalendar();
     }
@@ -1436,8 +1511,9 @@
 
   window.toggleDayLock = function(dayKey) {
     const plan = state.calendarPlans[monthKeyOfDay(dayKey)];
-    if (plan && plan[dayKey]) {
+    if (plan && plan[dayKey] && !plan[dayKey].deleted) {
       plan[dayKey].locked = !plan[dayKey].locked;
+      plan[dayKey].t = Date.now();
       persistLocal();
       renderCalendar();
     }
@@ -1445,9 +1521,10 @@
 
   window.toggleDayStatus = function(dayKey) {
     const plan = state.calendarPlans[monthKeyOfDay(dayKey)];
-    if (plan && plan[dayKey]) {
+    if (plan && plan[dayKey] && !plan[dayKey].deleted) {
       const cur = entryStatus(dayKey, plan[dayKey]);
       plan[dayKey].status = cur === 'cooked' ? 'skipped' : 'cooked';
+      plan[dayKey].t = Date.now();
       persistLocal();
       renderCalendar();
     }
@@ -1531,14 +1608,18 @@
 
     for (let day = 1; day <= totalDays; day++) {
       const dayKey = `${monthKey}-${String(day).padStart(2, '0')}`;
-      const existing = plan[dayKey];
-      // never overwrite: locked days, or days already in the past (tracked history)
-      if (existing && (existing.locked || dayKey < tStr)) {
-        recentByDay[day] = existing.recipe ? existing.recipe.id : null;
+      const raw = plan[dayKey];
+      const existing = (raw && raw.recipe && !raw.deleted) ? raw : null;
+      // never touch the past (tracked history) or locked days
+      if (dayKey < tStr) {
+        if (existing) { recentByDay[day] = existing.recipe.id; preserved++; }
+        continue;
+      }
+      if (existing && existing.locked) {
+        recentByDay[day] = existing.recipe.id;
         preserved++;
         continue;
       }
-      if (!existing && dayKey < tStr) continue; // don't invent history
 
       let pool = candidates;
       if (mode === 'alternating') {
@@ -1559,7 +1640,8 @@
         recipe: { id: pick.id, name: pick.name, url: pick.url, type: pick.type },
         note: existing ? existing.note : '',
         locked: false,
-        status: ''
+        status: '',
+        t: Date.now()
       };
       filled++;
     }
@@ -1576,10 +1658,10 @@
     const tStr = todayStr();
     // Only clear today & future — past days are history
     let cleared = 0, kept = 0;
-    for (const dayKey of Object.keys(plan)) {
-      if (dayKey >= tStr) { delete plan[dayKey]; cleared++; } else kept++;
+    for (const [dayKey, item] of Object.entries(plan)) {
+      if (!item || item.deleted) continue;
+      if (dayKey >= tStr) { plan[dayKey] = { deleted: true, t: Date.now() }; cleared++; } else kept++;
     }
-    if (!Object.keys(plan).length) delete state.calendarPlans[monthKey];
     persistLocal();
     renderCalendar();
     showNotification(kept ? `Cleared ${cleared} upcoming days — ${kept} tracked past days kept.` : 'Cleared plan for this month.', 'success');
@@ -1601,8 +1683,9 @@
   function saveCustomDayNote() {
     const dayKey = $('modal-target-date').value;
     const plan = state.calendarPlans[monthKeyOfDay(dayKey)]?.[dayKey];
-    if (plan) {
+    if (plan && !plan.deleted) {
       plan.note = $('modal-note-text').value.trim();
+      plan.t = Date.now();
       persistLocal();
       renderCalendar();
       $('modal-notes').close();
@@ -1997,14 +2080,11 @@
         prot: parseFloat($('meta-prot').value) || 0,
         carb: parseFloat($('meta-carb').value) || 0,
         fat: parseFloat($('meta-fat').value) || 0
-      } : null
+      } : null,
+      t: Date.now()
     };
-    // drop empty overrides entirely
-    if (meta.isComponent === null && !meta.cuisine && !meta.protein && !meta.nutrition) {
-      delete state.recipeMeta[recipeId];
-    } else {
-      state.recipeMeta[recipeId] = meta;
-    }
+    // keep even "empty" overrides so clearing one syncs to the household
+    state.recipeMeta[recipeId] = meta;
     persistLocal();
     $('modal-recipe-meta').close();
     renderAll();
@@ -2047,9 +2127,11 @@
       if (folders) {
         try { settings.folderConfigs = JSON.parse(decodeURIComponent(folders)); } catch (e) {}
       }
+      const dataId = hashParams.get('data');
+      if (dataId) settings.dataFileId = dataId;
       saveSettings();
       history.replaceState(null, null, window.location.pathname);
-      showNotification('Family setup imported! Click "Sign in & sync" to connect.', 'success');
+      showNotification('Family setup imported! Click "Sign in & sync" to join the shared dashboard.', 'success');
     }
   }
 
@@ -2057,8 +2139,9 @@
     if (!settings.clientId) { showNotification('Set up sync first before sharing.', 'error'); return; }
     let url = `${window.location.origin}${window.location.pathname}#client_id=${encodeURIComponent(settings.clientId)}`;
     if (settings.folderConfigs.length) url += `&folders=${encodeURIComponent(JSON.stringify(settings.folderConfigs))}`;
+    if (settings.dataFileId) url += `&data=${encodeURIComponent(settings.dataFileId)}`;
     navigator.clipboard.writeText(url).then(
-      () => showNotification('Family link copied — they get your full setup, zero configuration.', 'success'),
+      () => showNotification('Family link copied! Also share the recipe folders with them in Google Drive so they can access the same data.', 'success'),
       () => {
         const tmp = document.createElement('input');
         tmp.value = url; document.body.appendChild(tmp); tmp.select();
@@ -2092,7 +2175,7 @@
 
     $('btn-wizard-signin').addEventListener('click', async () => {
       const ok = await signIn(true);
-      if (ok) { await loadStateFromDrive(); wizardLoadFolders(); }
+      if (ok) wizardLoadFolders();
     });
 
     $('btn-sync-finish').addEventListener('click', async () => {
@@ -2102,11 +2185,11 @@
       saveSettings();
       $('modal-sync').close();
       await syncRecipesFromDrive();
-      await saveStateToDrive();
+      await syncSharedData();
     });
 
     $('btn-clear-credentials').addEventListener('click', () => {
-      settings = { clientId: '', isSharedUser: false, folderConfigs: [] };
+      settings = { clientId: '', isSharedUser: false, folderConfigs: [], dataFileId: '', grantedOnce: false };
       saveSettings();
       localStorage.removeItem(LS.token);
       localStorage.removeItem(LS.recipeCache);
@@ -2203,6 +2286,11 @@
     // library
     $('library-search').addEventListener('input', (e) => { state.librarySearch = e.target.value; renderLibrary(); });
     $('library-filter').addEventListener('change', (e) => { state.libraryFilter = e.target.value; renderLibrary(); });
+
+    // pull household changes the moment this tab comes back into focus
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && state.isConnectedToDrive) syncSharedData({ notify: true });
+    });
   }
 
   window.switchTab = switchTab; // used by inline links
@@ -2228,7 +2316,7 @@
       if (savedToken) {
         state.accessToken = savedToken;
         const ok = await syncRecipesFromDrive();
-        if (ok) loadStateFromDrive();
+        if (ok) syncSharedData({ notify: true });
       } else if (settings.grantedOnce) {
         // token expired but the user granted access before: try a silent
         // re-auth (works when the Google session is alive). Wait for the GIS
@@ -2237,7 +2325,7 @@
           try {
             await requestToken();
             const ok = await syncRecipesFromDrive();
-            if (ok) loadStateFromDrive();
+            if (ok) syncSharedData({ notify: true });
           } catch (e) { /* user reconnects via sidebar with one click */ }
         };
         if (typeof google !== 'undefined' && google.accounts) tryQuiet();
