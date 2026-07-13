@@ -430,9 +430,14 @@
         <p class="text-xs text-zinc-600 leading-relaxed">
           Choose which Drive folders hold your recipes and what category each one is. Every document in a selected folder becomes a recipe.
         </p>
+        <div class="relative flex items-center">
+          <input type="text" id="wizard-folder-search" placeholder="Search your folders by name…" class="w-full pl-8 pr-3 py-2 text-xs border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500">
+          <div class="absolute left-2.5 text-zinc-400 pointer-events-none"><i data-lucide="search" class="w-3.5 h-3.5"></i></div>
+        </div>
         <div id="folder-list" class="max-h-56 overflow-y-auto custom-scrollbar border border-zinc-200 rounded-lg divide-y divide-zinc-100 text-xs">
           <div class="p-4 text-center text-zinc-400">Loading your Drive folders…</div>
         </div>
+        <p class="text-[10px] text-zinc-400 leading-relaxed">Tip: click <i data-lucide="eye" class="w-3 h-3 inline"></i> on any folder to preview the files inside it. Selected folders stay pinned to the top.</p>
         <div class="flex justify-between pt-2">
           <button class="sync-back px-3 py-1.5 border border-zinc-200 text-zinc-600 text-xs font-medium rounded-lg hover:bg-zinc-50" data-to="2">Back</button>
           <button id="btn-sync-finish" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5">
@@ -560,6 +565,7 @@
   let tokenClient = null;
   let driveBackupTimer = null;
   let wizardFolderChoices = []; // temp state for step 3
+  let wizardFolderQuery = '';
 
   const $ = id => document.getElementById(id);
   const todayStr = () => {
@@ -759,12 +765,27 @@
   //  GOOGLE DRIVE — RECIPES
   // ============================================================
   async function listDriveFolders() {
-    const q = encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'me' in owners");
-    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=200&orderBy=name`;
+    const folders = [];
+    let pageToken = '';
+    do {
+      const q = encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false and 'me' in owners");
+      const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name,parents)&pageSize=1000&orderBy=name${pageToken ? '&pageToken=' + pageToken : ''}`;
+      const resp = await driveFetch(url);
+      if (!resp.ok) throw new Error('Could not list Drive folders');
+      const data = await resp.json();
+      folders.push(...(data.files || []));
+      pageToken = data.nextPageToken || '';
+    } while (pageToken && folders.length < 5000);
+    return folders;
+  }
+
+  // Preview the first few files inside a folder (for the wizard's eye button)
+  async function peekFolderFiles(folderId) {
+    const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+    const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(name,mimeType)&pageSize=8&orderBy=name`;
     const resp = await driveFetch(url);
-    if (!resp.ok) throw new Error('Could not list Drive folders');
-    const data = await resp.json();
-    return data.files || [];
+    if (!resp.ok) throw new Error('Could not read folder contents');
+    return (await resp.json()).files || [];
   }
 
   async function syncRecipesFromDrive() {
@@ -967,6 +988,8 @@
   async function wizardLoadFolders() {
     const listEl = $('folder-list');
     listEl.innerHTML = '<div class="p-4 text-center text-zinc-400">Loading your Drive folders…</div>';
+    $('wizard-folder-search').value = '';
+    wizardFolderQuery = '';
     showWizardStep(3);
     try {
       const folders = await listDriveFolders();
@@ -974,6 +997,19 @@
         listEl.innerHTML = '<div class="p-4 text-center text-zinc-400">No folders found in this Drive account.</div>';
         return;
       }
+      // build full paths so "Recipes" inside "Kitchen" reads "Kitchen / Recipes"
+      const byId = {};
+      folders.forEach(f => { byId[f.id] = f; });
+      const pathOf = (f) => {
+        const parts = [f.name];
+        let cur = f, depth = 0;
+        while (cur.parents && byId[cur.parents[0]] && depth++ < 6) {
+          cur = byId[cur.parents[0]];
+          parts.unshift(cur.name);
+        }
+        return parts.join(' / ');
+      };
+
       // pre-select previously configured folders, or guess by name
       wizardFolderChoices = folders.map(f => {
         const prev = settings.folderConfigs.find(c => c.id === f.id);
@@ -981,9 +1017,10 @@
         const looksPB = nameL.includes('plant');
         const looksRecipe = nameL.includes('recipe');
         return {
-          id: f.id, name: f.name,
+          id: f.id, name: f.name, path: pathOf(f),
           selected: prev ? true : (looksPB || looksRecipe),
-          type: prev ? prev.type : (looksPB ? 'plant-based' : 'standard')
+          type: prev ? prev.type : (looksPB ? 'plant-based' : 'standard'),
+          peekOpen: false, peekFiles: null
         };
       });
       renderWizardFolderList();
@@ -994,23 +1031,72 @@
 
   function renderWizardFolderList() {
     const listEl = $('folder-list');
-    listEl.innerHTML = wizardFolderChoices.map((f, i) => `
-      <div class="flex items-center gap-2.5 p-2.5 ${f.selected ? 'bg-emerald-50/40' : ''}">
-        <input type="checkbox" data-fidx="${i}" ${f.selected ? 'checked' : ''} class="wizard-folder-chk rounded text-emerald-600 flex-shrink-0">
-        <i data-lucide="folder" class="w-3.5 h-3.5 text-zinc-400 flex-shrink-0"></i>
-        <span class="flex-1 font-medium text-zinc-700 truncate" title="${escapeAttr(f.name)}">${escapeHtml(f.name)}</span>
-        <select data-fidx="${i}" class="wizard-folder-type text-[10px] border border-zinc-200 rounded-md py-1 px-1.5 bg-white ${f.selected ? '' : 'opacity-40'}">
-          <option value="standard" ${f.type === 'standard' ? 'selected' : ''}>🍖 Standard</option>
-          <option value="plant-based" ${f.type === 'plant-based' ? 'selected' : ''}>🌿 Plant-based</option>
-        </select>
-      </div>
-    `).join('');
+    const q = wizardFolderQuery.toLowerCase();
+
+    // selected folders always pinned on top; the rest filtered by search
+    const indexed = wizardFolderChoices.map((f, i) => ({ f, i }));
+    const pinned = indexed.filter(({ f }) => f.selected);
+    let rest = indexed.filter(({ f }) => !f.selected);
+    if (q) rest = rest.filter(({ f }) => f.path.toLowerCase().includes(q));
+    const shown = [...pinned, ...rest.slice(0, 60)];
+    const hiddenCount = rest.length - Math.min(rest.length, 60);
+
+    if (!shown.length) {
+      listEl.innerHTML = `<div class="p-4 text-center text-zinc-400">No folders match "${escapeHtml(wizardFolderQuery)}".</div>`;
+      return;
+    }
+
+    listEl.innerHTML = shown.map(({ f, i }) => {
+      const parentPath = f.path.length > f.name.length ? f.path.slice(0, f.path.length - f.name.length).replace(/ \/ $/, '') : '';
+      let peekHtml = '';
+      if (f.peekOpen) {
+        peekHtml = f.peekFiles === null
+          ? '<div class="pl-9 pb-2 text-[10px] text-zinc-400">Loading contents…</div>'
+          : f.peekFiles.length
+            ? `<div class="pl-9 pb-2 space-y-0.5">${f.peekFiles.map(n => `<div class="text-[10px] text-zinc-500 truncate flex items-center gap-1"><i data-lucide="file-text" class="w-2.5 h-2.5 flex-shrink-0"></i>${escapeHtml(n)}</div>`).join('')}</div>`
+            : '<div class="pl-9 pb-2 text-[10px] text-zinc-400 italic">This folder is empty.</div>';
+      }
+      return `
+      <div class="${f.selected ? 'bg-emerald-50/40' : ''}">
+        <div class="flex items-center gap-2.5 p-2.5">
+          <input type="checkbox" data-fidx="${i}" ${f.selected ? 'checked' : ''} class="wizard-folder-chk rounded text-emerald-600 flex-shrink-0">
+          <i data-lucide="folder" class="w-3.5 h-3.5 text-zinc-400 flex-shrink-0"></i>
+          <div class="flex-1 min-w-0">
+            <span class="font-medium text-zinc-700 truncate block" title="${escapeAttr(f.path)}">${escapeHtml(f.name)}</span>
+            ${parentPath ? `<span class="text-[9px] text-zinc-400 truncate block">in ${escapeHtml(parentPath)}</span>` : ''}
+          </div>
+          <button data-fidx="${i}" class="wizard-folder-peek p-1 rounded text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 flex-shrink-0" title="Preview files inside">
+            <i data-lucide="${f.peekOpen ? 'eye-off' : 'eye'}" class="w-3.5 h-3.5"></i>
+          </button>
+          <select data-fidx="${i}" class="wizard-folder-type text-[10px] border border-zinc-200 rounded-md py-1 px-1.5 bg-white flex-shrink-0 ${f.selected ? '' : 'opacity-40'}">
+            <option value="standard" ${f.type === 'standard' ? 'selected' : ''}>🍖 Standard</option>
+            <option value="plant-based" ${f.type === 'plant-based' ? 'selected' : ''}>🌿 Plant-based</option>
+          </select>
+        </div>
+        ${peekHtml}
+      </div>`;
+    }).join('') + (hiddenCount > 0 ? `<div class="p-2 text-center text-[10px] text-zinc-400">…and ${hiddenCount} more — type in the search box to narrow down.</div>` : '');
+
     listEl.querySelectorAll('.wizard-folder-chk').forEach(chk => chk.addEventListener('change', e => {
       wizardFolderChoices[parseInt(e.target.dataset.fidx)].selected = e.target.checked;
       renderWizardFolderList();
     }));
     listEl.querySelectorAll('.wizard-folder-type').forEach(sel => sel.addEventListener('change', e => {
       wizardFolderChoices[parseInt(e.target.dataset.fidx)].type = e.target.value;
+    }));
+    listEl.querySelectorAll('.wizard-folder-peek').forEach(btn => btn.addEventListener('click', async e => {
+      const f = wizardFolderChoices[parseInt(e.currentTarget.dataset.fidx)];
+      f.peekOpen = !f.peekOpen;
+      renderWizardFolderList();
+      if (f.peekOpen && f.peekFiles === null) {
+        try {
+          const files = await peekFolderFiles(f.id);
+          f.peekFiles = files.map(x => x.name);
+        } catch (err) {
+          f.peekFiles = [];
+        }
+        renderWizardFolderList();
+      }
     }));
     lucide.createIcons();
   }
@@ -2016,6 +2102,11 @@
       setDisconnectedUI();
       renderAll();
       showNotification('Sync settings reset. Meal history was kept.', 'success');
+    });
+
+    $('wizard-folder-search').addEventListener('input', (e) => {
+      wizardFolderQuery = e.target.value;
+      renderWizardFolderList();
     });
 
     $('btn-resync').addEventListener('click', () => { $('modal-sync').close(); syncRecipesFromDrive(); });
